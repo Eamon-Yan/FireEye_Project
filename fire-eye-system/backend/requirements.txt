@@ -1,0 +1,39 @@
+# FastAPI 核心依赖
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+email-validator
+
+# 数据库和缓存
+neo4j
+redis
+asyncio-redis
+
+# LLM 集成
+openai
+httpx
+
+# 文档处理
+python-multipart
+PyPDF2
+python-docx
+
+# 认证和安全
+python-jose[cryptography]
+passlib[bcrypt]
+
+# 测试框架
+pytest
+pytest-asyncio
+hypothesis
+
+# 开发工具
+black
+isort
+flake8
+mypy
+
+# 监控和日志
+prometheus-client
+structlog
