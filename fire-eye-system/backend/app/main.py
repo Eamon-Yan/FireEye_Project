@@ -68,6 +68,15 @@ app.add_middleware(
     allowed_hosts=settings.ALLOWED_HOSTS,
 )
 
+# 修改后 (临时允许所有，用于排查)：
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 改为 "*" 允许所有来源
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # 注册 API 路由
 app.include_router(api_router, prefix=settings.API_V1_STR)
 

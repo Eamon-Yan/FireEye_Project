@@ -1,0 +1,13 @@
+# Fire-Eye QQ Plugin Requirements
+
+# Core dependencies
+aiohttp>=3.8.0
+pyyaml>=6.0
+loguru>=0.7.0
+
+# AstrBot framework (should be installed separately)
+# astrbot>=0.1.0
+
+# Optional dependencies for enhanced functionality
+# aiofiles>=23.0.0  # For async file operations
+# redis>=4.0.0      # For distributed session storage

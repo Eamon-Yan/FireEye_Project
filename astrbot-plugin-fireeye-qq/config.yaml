@@ -1,0 +1,30 @@
+# Fire-Eye QQ Plugin Configuration
+# 火瞳 QQ 插件配置
+
+# Fire-Eye 后端 API 配置
+fire_eye:
+  api_url: "http://backend:8000/api/v1"
+  api_key: "smKlDXGrWLD9AzaT-ouPQjXUmQ9Zpfe3xBrcgwor3YA"  # AstrBot 集成 API Key
+  timeout: 30  # 请求超时时间（秒）
+  retries: 3   # 失败重试次数
+
+# 会话管理配置
+session:
+  ttl: 1800  # 会话过期时间（秒），30分钟
+
+# 请求队列配置
+request_queue:
+  max_concurrent: 5   # 最大并发请求数
+  max_queue_size: 20  # 队列最大长度
+
+# QQ 特定配置
+qq:
+  max_message_length: 4096  # QQ 消息最大长度
+  polling_interval: 3       # 任务轮询间隔（秒）
+
+# 日志配置
+logging:
+  level: "INFO"                  # 日志级别: DEBUG, INFO, WARNING, ERROR
+  file: "./logs/fireeye-qq.log"  # 日志文件路径
+  max_size: 10485760             # 单个日志文件最大大小（字节），10MB
+  backup_count: 5                # 保留的日志文件数量

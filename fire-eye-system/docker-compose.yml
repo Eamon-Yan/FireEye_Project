@@ -63,9 +63,9 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-    volumes:
-      - ./backend:/app
-      - backend_uploads:/app/uploads
+    # volumes:
+    #   - ./backend:/app
+    #   - backend_uploads:/app/uploads
     depends_on:
       - neo4j
       - redis
@@ -92,10 +92,10 @@ services:
       - "5000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
+    # volumes:
+    #   - ./frontend:/app
+    #   - /app/node_modules
+    #   - /app/.next
     depends_on:
       - backend
     networks:

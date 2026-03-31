@@ -1,0 +1,67 @@
+# Fire-Eye QQ Plugin Metadata
+
+name: "fire-eye-qq"
+display_name: "火瞳 QQ 插件"
+version: "1.0.0"
+author: "Fire-Eye Team"
+description: "火瞳火灾调查知识图谱系统的 QQ 集成插件"
+
+# 插件类型
+type: "command"
+
+# 支持的平台
+platforms:
+  - "qq"
+
+# 依赖
+dependencies:
+  - "aiohttp>=3.8.0"
+  - "pyyaml>=6.0"
+  - "loguru>=0.7.0"
+
+# 权限要求
+permissions:
+  - "send_message"
+  - "receive_message"
+
+# 配置文件
+config_file: "config.yaml"
+
+# 主入口
+main_class: "Main"
+
+# 命令列表
+commands:
+  - name: "火瞳查询"
+    aliases: ["ht查询"]
+    description: "查询火灾事件和相关信息"
+    usage: "/火瞳查询 <查询内容>"
+    
+  - name: "火瞳统计"
+    aliases: ["ht统计"]
+    description: "获取系统统计信息"
+    usage: "/火瞳统计"
+    
+  - name: "火瞳帮助"
+    aliases: ["ht帮助"]
+    description: "显示帮助信息"
+    usage: "/火瞳帮助"
+
+# 功能特性
+features:
+  - "知识图谱查询"
+  - "统计信息查看"
+  - "会话管理"
+  - "请求队列"
+  - "错误处理"
+
+# 更新信息
+update_url: "https://github.com/your-repo/astrbot-plugin-fireeye-qq"
+changelog_url: "https://github.com/your-repo/astrbot-plugin-fireeye-qq/blob/main/CHANGELOG.md"
+
+# 标签
+tags:
+  - "fire-eye"
+  - "qq"
+  - "knowledge-graph"
+  - "fire-investigation"
