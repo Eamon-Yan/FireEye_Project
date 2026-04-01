@@ -43,12 +43,10 @@ async def get_graph_service() -> AsyncGenerator[GraphService, None]:
         await graph_service.initialize()
         yield graph_service
     except Exception as e:
-        # 记录错误但不重新抛出，让调用者处理
         import logging
         logger = logging.getLogger(__name__)
         logger.error(f"图服务初始化失败: {e}")
-        # 仍然yield服务实例，让端点处理错误
-        yield graph_service
+        raise
 
 
 async def get_redis_client() -> AsyncGenerator[RedisClient, None]:

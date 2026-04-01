@@ -1,5 +1,7 @@
 name: "Fire-Eye"
 author: "FireEye Team"
 desc: "火瞳火灾调查知识图谱查询插件"
-version: "1.0.0"
+version: "1.0.1"
 repo: "https://github.com/fireeye/astrbot-plugin-fireeye"
+platforms:
+  - "telegram"

@@ -88,10 +88,11 @@ class HazardNode(BaseSchema, TimestampMixin):
     """隐患节点"""
     id: str = Field(description="隐患ID")
     description: str = Field(description="隐患描述", max_length=1000)
+    standard_term: str = Field(description="标准术语", max_length=200)
     risk_level: RiskLevel = Field(description="风险等级")
     location: str = Field(description="位置信息", max_length=200)
     
-    @field_validator("description", "location")
+    @field_validator("description", "standard_term", "location")
     @classmethod
     def validate_text_fields(cls, v):
         """验证文本字段"""
@@ -104,10 +105,11 @@ class ConsequenceNode(BaseSchema, TimestampMixin):
     """后果节点"""
     id: str = Field(description="后果ID")
     description: str = Field(description="后果描述", max_length=1000)
+    standard_term: str = Field(description="标准术语", max_length=200)
     impact_level: ImpactLevel = Field(description="影响程度")
     affected_area: str = Field(description="影响区域", max_length=200)
     
-    @field_validator("description", "affected_area")
+    @field_validator("description", "standard_term", "affected_area")
     @classmethod
     def validate_text_fields(cls, v):
         """验证文本字段"""

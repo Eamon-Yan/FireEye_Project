@@ -4,11 +4,11 @@
 
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from enum import Enum
 
 from .base import BaseSchema, TimestampMixin
-from .event_chain import EventChain
+from .event_chain import EventChain, EventChainCreate, RelationType
 
 
 class ProcessingStatus(str, Enum):
@@ -37,6 +37,20 @@ class SectionType(str, Enum):
     OTHER = "其他"
 
 
+class ExtractedNodeType(str, Enum):
+    """分层抽取节点类型"""
+    HAZARD = "Hazard"
+    FIRE_EVENT = "FireEvent"
+    CONSEQUENCE = "Consequence"
+
+
+class ExtractedRelationType(str, Enum):
+    """分层抽取关系类型"""
+    LEADS_TO = "LEADS_TO"
+    CAUSES = "CAUSES"
+    RESULTS_IN = "RESULTS_IN"
+
+
 class DocumentSections(BaseSchema):
     """文档章节"""
     sections: Dict[str, str] = Field(description="章节内容映射")
@@ -48,9 +62,8 @@ class DocumentSections(BaseSchema):
         if not v:
             raise ValueError("章节内容不能为空")
         
-        # 检查是否有任何有效内容
         has_content = False
-        for section_name, content in v.items():
+        for _, content in v.items():
             if content and content.strip():
                 has_content = True
                 break
@@ -61,6 +74,104 @@ class DocumentSections(BaseSchema):
         return v
 
 
+class ExtractedNode(BaseSchema):
+    """LLM 抽取出的分层节点"""
+    node_type: ExtractedNodeType = Field(description="节点类型")
+    description: str = Field(description="节点描述", min_length=2, max_length=1000)
+    standard_term: str = Field(description="标准术语", min_length=2, max_length=200)
+    context: str = Field(default="", description="上下文信息", max_length=1000)
+
+    @field_validator("description", "standard_term", mode="before")
+    @classmethod
+    def validate_text_fields(cls, v):
+        if not v or not str(v).strip():
+            raise ValueError("文本字段不能为空")
+        return str(v).strip()
+
+    @field_validator("context", mode="before")
+    @classmethod
+    def validate_context(cls, v):
+        return str(v).strip() if v else ""
+
+
+class ExtractedEdge(BaseSchema):
+    """LLM 抽取出的分层关系"""
+    source: str = Field(description="源节点标准术语", min_length=2, max_length=200)
+    source_type: ExtractedNodeType = Field(description="源节点类型")
+    target: str = Field(description="目标节点标准术语", min_length=2, max_length=200)
+    target_type: ExtractedNodeType = Field(description="目标节点类型")
+    relation: ExtractedRelationType = Field(description="关系类型")
+    confidence: float = Field(description="置信度", ge=0.0, le=1.0)
+    context: str = Field(default="", description="上下文信息", max_length=1000)
+
+    @field_validator("source", "target", mode="before")
+    @classmethod
+    def validate_endpoints(cls, v):
+        if not v or not str(v).strip():
+            raise ValueError("关系端点不能为空")
+        return str(v).strip()
+
+    @field_validator("context", mode="before")
+    @classmethod
+    def validate_context(cls, v):
+        return str(v).strip() if v else ""
+
+    @model_validator(mode="after")
+    def validate_relation_semantics(self):
+        allowed = {
+            (ExtractedNodeType.HAZARD, ExtractedRelationType.LEADS_TO, ExtractedNodeType.FIRE_EVENT),
+            (ExtractedNodeType.HAZARD, ExtractedRelationType.CAUSES, ExtractedNodeType.HAZARD),
+            (ExtractedNodeType.HAZARD, ExtractedRelationType.CAUSES, ExtractedNodeType.FIRE_EVENT),
+            (ExtractedNodeType.HAZARD, ExtractedRelationType.RESULTS_IN, ExtractedNodeType.CONSEQUENCE),
+            (ExtractedNodeType.FIRE_EVENT, ExtractedRelationType.CAUSES, ExtractedNodeType.FIRE_EVENT),
+            (ExtractedNodeType.FIRE_EVENT, ExtractedRelationType.RESULTS_IN, ExtractedNodeType.CONSEQUENCE),
+            (ExtractedNodeType.FIRE_EVENT, ExtractedRelationType.CAUSES, ExtractedNodeType.CONSEQUENCE),
+        }
+        triple = (self.source_type, self.relation, self.target_type)
+        if triple not in allowed:
+            raise ValueError(
+                f"不支持的分层关系: {self.source_type} -[{self.relation}]-> {self.target_type}"
+            )
+        return self
+
+
+class LayeredExtractionResult(BaseSchema):
+    """分层抽取结果"""
+    nodes: List[ExtractedNode] = Field(default_factory=list, description="抽取出的节点")
+    edges: List[ExtractedEdge] = Field(default_factory=list, description="抽取出的关系")
+
+    @field_validator("nodes")
+    @classmethod
+    def validate_nodes(cls, v):
+        if not v:
+            raise ValueError("抽取节点不能为空")
+        return v
+
+    @field_validator("edges")
+    @classmethod
+    def validate_edges(cls, v):
+        if not v:
+            raise ValueError("抽取关系不能为空")
+        return v
+
+    def to_event_chains(self) -> List[EventChainCreate]:
+        relation_mapping = {
+            ExtractedRelationType.LEADS_TO: RelationType.TRIGGERS,
+            ExtractedRelationType.CAUSES: RelationType.CAUSES,
+            ExtractedRelationType.RESULTS_IN: RelationType.CAUSES,
+        }
+        return [
+            EventChainCreate(
+                source=edge.source,
+                relation=relation_mapping[edge.relation],
+                target=edge.target,
+                confidence=edge.confidence,
+                context=edge.context,
+            )
+            for edge in self.edges
+        ]
+
+
 class ExtractionResult(BaseSchema, TimestampMixin):
     """抽取结果"""
     document_id: str = Field(description="文档ID")
@@ -68,11 +179,11 @@ class ExtractionResult(BaseSchema, TimestampMixin):
     quality_score: float = Field(description="质量评分", ge=0.0, le=1.0)
     processing_time: float = Field(description="处理时间(秒)", ge=0.0)
     errors: List[str] = Field(default_factory=list, description="错误信息")
+    layered_result: Optional[LayeredExtractionResult] = Field(default=None, description="分层抽取结果")
     
     @field_validator("event_chains")
     @classmethod
     def validate_event_chains(cls, v):
-        """验证事件链"""
         if not v:
             raise ValueError("事件链不能为空")
         return v
@@ -109,7 +220,6 @@ class ExtractionRequest(BaseSchema):
     @field_validator("document_id")
     @classmethod
     def validate_document_id(cls, v):
-        """验证文档ID"""
         if not v or v.isspace():
             raise ValueError("文档ID不能为空")
         return v.strip()
@@ -166,14 +276,10 @@ class BatchExtractionRequest(BaseSchema):
     @field_validator("document_ids")
     @classmethod
     def validate_document_ids(cls, v):
-        """验证文档ID列表"""
         if not v:
             raise ValueError("文档ID列表不能为空")
-        
-        # 检查重复
         if len(v) != len(set(v)):
             raise ValueError("文档ID列表包含重复项")
-        
         return v
 
 

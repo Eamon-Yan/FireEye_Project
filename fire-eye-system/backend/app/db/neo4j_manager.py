@@ -181,6 +181,7 @@ class Neo4jManager:
             labels=["Hazard"],
             properties={
                 "description": hazard.description,
+                "standard_term": hazard.standard_term,
                 "risk_level": hazard.risk_level,
                 "location": hazard.location
             }
@@ -197,6 +198,7 @@ class Neo4jManager:
             labels=["Consequence"],
             properties={
                 "description": consequence.description,
+                "standard_term": consequence.standard_term,
                 "impact_level": consequence.impact_level,
                 "affected_area": consequence.affected_area
             }
@@ -324,7 +326,8 @@ class Neo4jManager:
         target_id: str,
         confidence: float,
         relation_type: str = "导致",
-        time_delay: Optional[int] = None
+        time_delay: Optional[int] = None,
+        relationship_label: str = "CAUSES"
     ) -> str:
         """创建因果关系"""
         properties = {
@@ -336,7 +339,7 @@ class Neo4jManager:
             properties["time_delay"] = time_delay
         
         rel_data = RelationshipCreate(
-            type="CAUSES",
+            type=relationship_label,
             start_node=source_id,
             end_node=target_id,
             properties=properties
@@ -401,10 +404,12 @@ class Neo4jManager:
     async def create_event_chain(self, event_chain: EventChain) -> Dict[str, str]:
         """从事件链创建节点和关系"""
         # 创建或获取源节点
-        source_node_id = await self._get_or_create_event_node(event_chain.source)
+        source_node_id, source_node_label = await self._get_or_create_event_node(event_chain.source)
         
         # 创建或获取目标节点
-        target_node_id = await self._get_or_create_event_node(event_chain.target)
+        target_node_id, target_node_label = await self._get_or_create_event_node(event_chain.target)
+        
+        relationship_label = self._determine_relationship_label(source_node_label, target_node_label)
         
         # 创建关系
         rel_id = await self.create_causal_relationship(
@@ -412,19 +417,26 @@ class Neo4jManager:
             target_node_id,
             event_chain.confidence,
             event_chain.relation,
-            None  # 可以从 event_chain.timestamp 计算时间延迟
+            None,  # 可以从 event_chain.timestamp 计算时间延迟
+            relationship_label
         )
         
-        logger.info(f"创建事件链成功: {event_chain.source} -> {event_chain.target}")
+        logger.info(
+            f"创建事件链成功: {event_chain.source}({source_node_label}) -> "
+            f"{event_chain.target}({target_node_label}), relation={relationship_label}"
+        )
         
         return {
             "source_node_id": source_node_id,
             "target_node_id": target_node_id,
-            "relationship_id": rel_id
+            "source_node_label": source_node_label,
+            "target_node_label": target_node_label,
+            "relationship_id": rel_id,
+            "relationship_label": relationship_label
         }
     
-    async def _get_or_create_event_node(self, event_description: str) -> str:
-        """获取或创建事件节点"""
+    async def _get_or_create_event_node(self, event_description: str) -> tuple[str, str]:
+        """获取或创建事件节点，返回 (node_id, node_label)"""
         # 首先尝试查找现有节点
         query = """
         MATCH (n)
@@ -440,7 +452,8 @@ class Neo4jManager:
         )
         
         if result and result.get("node_id"):
-            return result["node_id"]
+            labels = result.get("labels") or []
+            return result["node_id"], (labels[0] if labels else "FireEvent")
         
         # 如果不存在，根据描述内容智能分类并创建新节点
         node_type, node_label = self._classify_event_type(event_description)
@@ -456,25 +469,36 @@ class Neo4jManager:
                 severity_level=5,
                 frequency=1
             )
-            return await self.create_fire_event_node(event_node)
+            created_id = await self.create_fire_event_node(event_node)
+            return created_id, "FireEvent"
         elif node_label == "Hazard":
             hazard_node = HazardNode(
                 id=node_id,
                 description=event_description,
-                standard_term=event_description,
                 risk_level="中",
                 location="未知"
             )
-            return await self.create_hazard_node(hazard_node)
+            created_id = await self.create_hazard_node(hazard_node)
+            return created_id, "Hazard"
         else:  # Consequence
             consequence_node = ConsequenceNode(
                 id=node_id,
                 description=event_description,
-                standard_term=event_description,
                 impact_level="中",
                 affected_area="未知"
             )
-            return await self.create_consequence_node(consequence_node)
+            created_id = await self.create_consequence_node(consequence_node)
+            return created_id, "Consequence"
+    
+    def _determine_relationship_label(self, source_label: str, target_label: str) -> str:
+        """根据源/目标节点类型确定关系类型，保证结构符合 隐患 -> 火灾事件 -> 后果"""
+        if source_label == "Hazard" and target_label == "FireEvent":
+            return "LEADS_TO"
+        if source_label == "FireEvent" and target_label == "Consequence":
+            return "RESULTS_IN"
+        if source_label == "Hazard" and target_label == "Consequence":
+            return "RESULTS_IN"
+        return "CAUSES"
     
     def _classify_event_type(self, description: str) -> tuple[str, str]:
         """
@@ -483,50 +507,44 @@ class Neo4jManager:
         Returns:
             (event_type, node_label): 事件类型和节点标签
         """
-        desc_lower = description.lower()
-        
-        # 安全隐患关键词（Hazard - 橙色）
+        desc_lower = description.lower().strip()
+
         hazard_keywords = [
-            "隐患", "老化", "破损", "故障", "缺陷", "不合格", "违规", 
+            "隐患", "老化", "破损", "故障", "缺陷", "不合格", "违规",
             "未检查", "未维护", "未及时", "缺乏", "不到位", "不规范",
             "超负荷", "过载", "短路", "漏电", "绝缘", "腐蚀", "锈蚀",
-            "堆放", "堵塞", "占用", "私拉", "乱接", "改装"
+            "堆放", "堵塞", "占用", "私拉", "乱接", "改装", "失效",
+            "损坏", "异常", "松动", "裸露", "未设置", "未安装", "未配备"
         ]
-        
-        # 后果影响关键词（Consequence - 紫色）
-        consequence_keywords = [
-            "造成", "导致", "引起", "产生", "形成", "发生",
-            "伤亡", "死亡", "受伤", "损失", "损坏", "烧毁", "坍塌",
-            "蔓延", "扩散", "波及", "影响", "污染", "中毒", "窒息",
-            "财产损失", "经济损失", "人员伤亡", "群众", "居民", "人员"
-        ]
-        
-        # 火灾事件关键词（FireEvent - 红色）
+
         fire_event_keywords = [
             "起火", "着火", "燃烧", "火灾", "火势", "明火", "火焰", "火星",
             "爆炸", "爆燃", "闪燃", "轰燃", "复燃", "阴燃",
             "烟雾", "浓烟", "烟气", "高温", "过热", "发热",
             "点燃", "引燃", "自燃", "电弧", "火花", "烟头"
         ]
-        
-        # 统计关键词匹配数
-        hazard_count = sum(1 for kw in hazard_keywords if kw in desc_lower)
-        consequence_count = sum(1 for kw in consequence_keywords if kw in desc_lower)
-        fire_count = sum(1 for kw in fire_event_keywords if kw in desc_lower)
-        
-        # 根据匹配数量判断类型
-        max_count = max(hazard_count, consequence_count, fire_count)
-        
-        if max_count == 0:
-            # 没有匹配到关键词，默认为火灾事件
-            return ("过程", "FireEvent")
-        
-        if hazard_count == max_count:
-            return ("隐患", "Hazard")
-        elif consequence_count == max_count:
+
+        consequence_keywords = [
+            "伤亡", "死亡", "受伤", "损失", "烧毁", "坍塌", "蔓延", "扩散",
+            "波及", "影响", "污染", "中毒", "窒息", "财产损失", "经济损失",
+            "人员伤亡", "群众", "居民", "停产", "停电", "破坏", "报废"
+        ]
+
+        if any(kw in desc_lower for kw in consequence_keywords):
             return ("后果", "Consequence")
-        else:
+
+        if any(kw in desc_lower for kw in fire_event_keywords):
             return ("过程", "FireEvent")
+
+        if any(kw in desc_lower for kw in hazard_keywords):
+            return ("隐患", "Hazard")
+
+        # 带有明显结果语义的短语优先判为后果，避免“导致/造成/引起/发生”把前因误判成后果
+        if desc_lower.startswith(("导致", "造成", "引起")):
+            return ("后果", "Consequence")
+
+        # 默认未知前因更适合放入隐患，而不是火灾事件，可减少导入后整图偏红
+        return ("隐患", "Hazard")
     
     # ===== 查询操作 =====
     

@@ -3,9 +3,11 @@ Fire-Eye QQ Plugin - Main Entry Point
 火瞳 QQ 插件 - 主入口
 """
 
+import os
 import yaml
 import aiohttp
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 from loguru import logger
 from astrbot.api import star
 from astrbot.api.event import AstrMessageEvent, filter, MessageEventResult
@@ -38,65 +40,99 @@ class Main(star.Star):
         
         logger.info("[Fire-Eye QQ] Plugin initialized")
         logger.info(f"[Fire-Eye QQ] API URL: {self.api_url}")
+
+    def _build_url_with_host(self, parsed, host: str, port: str) -> str:
+        netloc = host
+        if port:
+            netloc = f"{host}:{port}"
+        return urlunparse(parsed._replace(netloc=netloc)).rstrip('/')
+    
+    def _normalize_api_url(self, api_url: str) -> str:
+        """规范化 API 地址，兼容不同 Docker 网络与宿主机访问方式。"""
+        default_url = "http://host.docker.internal:8000/api/v1"
+
+        if not api_url:
+            logger.warning(f"[Fire-Eye QQ] Empty api_url detected, fallback to {default_url}")
+            return default_url
+
+        api_url = api_url.strip()
+        backend_host = os.getenv("FIRE_EYE_BACKEND_HOST", "").strip()
+        backend_port = os.getenv("FIRE_EYE_BACKEND_PORT", "8000").strip() or "8000"
+        parsed = urlparse(api_url)
+
+        if backend_host:
+            normalized_url = self._build_url_with_host(parsed, backend_host, backend_port)
+            logger.info(f"[Fire-Eye QQ] api_url overridden by env: {normalized_url}")
+            return normalized_url
+
+        hostname = parsed.hostname or ""
+
+        if hostname in {"127.0.0.1", "localhost"}:
+            normalized_url = self._build_url_with_host(parsed, "host.docker.internal", backend_port)
+            logger.warning(
+                f"[Fire-Eye QQ] Detected loopback api_url '{api_url}', rewritten to host gateway: {normalized_url}"
+            )
+            return normalized_url
+
+        if hostname == "fire-eye-backend":
+            logger.info(f"[Fire-Eye QQ] Keep docker service api_url: {api_url.rstrip('/')}" )
+            return api_url.rstrip('/')
+
+        return api_url.rstrip('/')
     
     def _load_config(self):
         """加载配置文件"""
+        default_api_url = "http://host.docker.internal:8000/api/v1"
+        default_api_key = "smKlDXGrWLD9AzaT-ouPQjXUmQ9Zpfe3xBrcgwor3YA"
+
         try:
             config_path = Path(__file__).parent / "config.yaml"
             
             if not config_path.exists():
                 logger.error(f"[Fire-Eye QQ] Configuration file not found: {config_path}")
-                # 使用默认配置
-                self.api_url = "http://fire-eye-backend:8000/api/v1"
-                self.api_key = "smKlDXGrWLD9AzaT-ouPQjXUmQ9Zpfe3xBrcgwor3YA"
+                self.api_url = self._normalize_api_url(default_api_url)
+                self.api_key = default_api_key
                 return
             
             with open(config_path, 'r', encoding='utf-8') as f:
-                self.plugin_config = yaml.safe_load(f)
+                self.plugin_config = yaml.safe_load(f) or {}
             
-            # 提取配置
             fire_eye_config = self.plugin_config.get('fire_eye', {})
-            self.api_url = fire_eye_config.get('api_url', 'http://fire-eye-backend:8000/api/v1')
-            self.api_key = fire_eye_config.get('api_key', 'smKlDXGrWLD9AzaT-ouPQjXUmQ9Zpfe3xBrcgwor3YA')
+            self.api_url = self._normalize_api_url(fire_eye_config.get('api_url', default_api_url))
+            self.api_key = fire_eye_config.get('api_key', default_api_key)
             
             logger.info("[Fire-Eye QQ] Configuration loaded successfully")
             
         except Exception as e:
             logger.error(f"[Fire-Eye QQ] Failed to load config: {e}")
-            # 使用默认配置
-            self.api_url = "http://fire-eye-backend:8000/api/v1"
-            self.api_key = "smKlDXGrWLD9AzaT-ouPQjXUmQ9Zpfe3xBrcgwor3YA"
+            self.api_url = self._normalize_api_url(default_api_url)
+            self.api_key = default_api_key
     
     def _initialize_components(self):
         """初始化组件"""
         try:
-            # 导入组件
             from .api.client import APIClient
             from .session.manager import SessionManager
             from .queue.request_queue import RequestQueue
             from .utils.formatter import MessageFormatter
             
-            # 初始化 API 客户端
             self.api_client = APIClient(
                 api_url=self.api_url,
                 api_key=self.api_key,
                 timeout=30
             )
             
-            # 初始化会话管理器
             session_config = self.plugin_config.get('session', {}) if self.plugin_config else {}
             self.session_manager = SessionManager(
                 session_ttl=session_config.get('ttl', 1800)
             )
             
-            # 初始化请求队列
             queue_config = self.plugin_config.get('request_queue', {}) if self.plugin_config else {}
             self.request_queue = RequestQueue(
                 max_concurrent=queue_config.get('max_concurrent', 5),
                 max_queue_size=queue_config.get('max_queue_size', 20)
             )
             
-            # 初始化消息格式化器
             qq_config = self.plugin_config.get('qq', {}) if self.plugin_config else {}
             self.formatter = MessageFormatter(
                 max_message_length=qq_config.get('max_message_length', 4096),
@@ -161,10 +197,8 @@ class Main(star.Star):
     async def query_command(self, event: AstrMessageEvent, message: str = ""):
         """查询命令"""
         try:
-            # 获取查询文本
             query_text = message.strip() if message else event.message_str.strip()
             
-            # 移除命令前缀
             for prefix in ["/火瞳查询", "/ht查询", "火瞳查询", "ht查询"]:
                 if query_text.startswith(prefix):
                     query_text = query_text[len(prefix):].strip()
@@ -176,7 +210,6 @@ class Main(star.Star):
             
             logger.info(f"[Fire-Eye QQ] Query command: {query_text}")
             
-            # 获取用户 ID - QQ 官方频道使用不同的属性
             try:
                 if hasattr(event, 'user_id'):
                     user_id = str(event.user_id)
@@ -190,15 +223,12 @@ class Main(star.Star):
                 logger.warning(f"[Fire-Eye QQ] Failed to get user_id: {e}")
                 user_id = "unknown"
             
-            # 获取或创建会话
             session_id = self.session_manager.get_session(user_id)
             if not session_id:
                 session_id = self.session_manager.create_session(user_id, "qq")
             
-            # 发送"处理中"提示
             event.set_result(MessageEventResult().message("🔍 正在查询，请稍候..."))
             
-            # 调用后端 API
             try:
                 result = await self.api_client.query(
                     query=query_text,
@@ -209,7 +239,6 @@ class Main(star.Star):
                     event.set_result(MessageEventResult().message("❌ 查询失败，请稍后重试"))
                     return
                 
-                # 解析结果
                 if result.get("status") == "success":
                     data = result.get("data", {})
                     results = data.get("results", [])
@@ -219,7 +248,7 @@ class Main(star.Star):
                     else:
                         response = f"🔍 查询: {query_text}\n\n找到 {len(results)} 条结果:\n\n"
                         
-                        for i, item in enumerate(results[:5], 1):  # 只显示前5条
+                        for i, item in enumerate(results[:5], 1):
                             node_type = item.get("type", "Unknown")
                             name = item.get("name", item.get("id", ""))
                             desc = item.get("description", "")
@@ -234,9 +263,7 @@ class Main(star.Star):
                         
                         response += f"\n💬 会话ID: {session_id[:12]}..."
                     
-                    # 更新会话活动时间
                     self.session_manager.update_activity(user_id)
-                    
                     event.set_result(MessageEventResult().message(response))
                 else:
                     error_msg = result.get("detail", "未知错误")
@@ -255,8 +282,6 @@ class Main(star.Star):
         """统计命令"""
         try:
             logger.info("[Fire-Eye QQ] Stats command triggered")
-            
-            # 发送"处理中"提示
             event.set_result(MessageEventResult().message("📊 正在获取统计信息，请稍候..."))
             
             # 调用后端 API

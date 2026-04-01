@@ -340,7 +340,7 @@ export default function GraphViewer() {
           color: 'white',
           margin: 0,
         }}>
-          FireEye Graph
+          火瞳关系图
         </h1>
         
         <div style={{ 
@@ -363,7 +363,7 @@ export default function GraphViewer() {
             }} />
             <input
               type="text"
-              placeholder="Search nodes..."
+              placeholder="搜索节点..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               style={{
@@ -388,16 +388,16 @@ export default function GraphViewer() {
           alignItems: 'center',
         }}>
           <div style={{ textAlign: 'center' }}>
-            <div style={{ 
-              fontSize: '0.75rem', 
+            <div style={{
+              fontSize: '0.75rem',
               color: 'rgba(255, 255, 255, 0.7)',
               marginBottom: '0.25rem',
             }}>
-              Nodes
+              节点
             </div>
-            <div style={{ 
-              fontSize: '1.5rem', 
-              fontWeight: 'bold', 
+            <div style={{
+              fontSize: '1.5rem',
+              fontWeight: 'bold',
               color: 'white',
             }}>
               {graphData.nodes.length}
@@ -405,16 +405,16 @@ export default function GraphViewer() {
           </div>
           
           <div style={{ textAlign: 'center' }}>
-            <div style={{ 
-              fontSize: '0.75rem', 
+            <div style={{
+              fontSize: '0.75rem',
               color: 'rgba(255, 255, 255, 0.7)',
               marginBottom: '0.25rem',
             }}>
-              Links
+              关系
             </div>
-            <div style={{ 
-              fontSize: '1.5rem', 
-              fontWeight: 'bold', 
+            <div style={{
+              fontSize: '1.5rem',
+              fontWeight: 'bold',
               color: 'white',
             }}>
               {graphData.links.length}
@@ -444,7 +444,7 @@ export default function GraphViewer() {
             fontWeight: '500',
             color: 'white',
           }}
-          title="Upload Document"
+          title="上传文档"
           onMouseEnter={(e) => {
             e.currentTarget.style.backgroundColor = 'rgba(251, 146, 60, 1)'
             e.currentTarget.style.transform = 'translateY(-1px)'
@@ -471,7 +471,7 @@ export default function GraphViewer() {
             justifyContent: 'center',
             transition: 'all 0.2s',
           }}
-          title="Refresh"
+          title="刷新"
           onMouseEnter={(e) => {
             e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.3)'
           }}
@@ -495,7 +495,7 @@ export default function GraphViewer() {
             justifyContent: 'center',
             transition: 'all 0.2s',
           }}
-          title="Export"
+          title="导出"
           onMouseEnter={(e) => {
             e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.3)'
           }}
@@ -859,7 +859,7 @@ export default function GraphViewer() {
               animation: 'spin 1s linear infinite',
               margin: '0 auto 1rem',
             }} />
-            <p style={{ color: 'white', fontWeight: '500', margin: 0 }}>Loading graph data...</p>
+            <p style={{ color: 'white', fontWeight: '500', margin: 0 }}>正在加载关系图数据...</p>
           </div>
         </div>
       )}
@@ -892,10 +892,10 @@ export default function GraphViewer() {
               color: 'white',
               marginBottom: '0.5rem',
             }}>
-              No Graph Data
+              暂无关系图数据
             </h2>
             <p style={{ color: 'rgba(255, 255, 255, 0.8)', margin: 0 }}>
-              Upload documents to generate the knowledge graph
+              请先上传文档以生成知识图谱
             </p>
           </div>
         </div>
