@@ -1,0 +1,8 @@
+version: '3.8'
+
+services:
+  neo4j:
+    environment:
+      # Only use this override when creating a brand-new Neo4j data volume.
+      # NEO4J_AUTH is a first-start initialization setting, not a runtime sync setting.
+      - NEO4J_AUTH=neo4j/password
