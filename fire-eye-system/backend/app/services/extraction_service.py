@@ -39,7 +39,6 @@ class DocumentParser:
         self.supported_extensions = {
             '.pdf': FileType.PDF,
             '.docx': FileType.DOCX,
-            '.doc': FileType.DOC,
             '.txt': FileType.TXT
         }
     
@@ -284,7 +283,11 @@ class ExtractionService:
         self.upload_dir.mkdir(exist_ok=True)
     
     async def process_document(self, file: UploadFile) -> Tuple[str, DocumentSections]:
-        file_extension = Path(file.filename).suffix.lower()
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="文件名不能为空")
+
+        filename = file.filename
+        file_extension = Path(filename).suffix.lower()
         if file_extension not in self.parser.supported_extensions:
             raise HTTPException(
                 status_code=400,
@@ -298,6 +301,11 @@ class ExtractionService:
         try:
             with open(file_path, "wb") as buffer:
                 content = await file.read()
+                if len(content) > settings.MAX_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"文件大小超过限制 ({settings.MAX_FILE_SIZE} bytes)"
+                    )
                 buffer.write(content)
             
             logger.info(f"文件保存成功: {file_path}")
@@ -397,12 +405,19 @@ class ExtractionService:
         apply_validation: bool = True
     ) -> Tuple[str, DocumentSections, List[EventChainCreate], Dict[str, Any], Optional[LayeredExtractionResult]]:
         """完整的文档处理流程：上传 -> 解析 -> 章节提取 -> 事件链提取 -> 验证"""
-        document_id, document_sections = await self.process_document(file)
-        event_chains, processing_stats, layered_result = await self.extract_and_validate_event_chains(
-            document_sections,
-            apply_validation
-        )
-        return document_id, document_sections, event_chains, processing_stats, layered_result
+        file_extension = Path(file.filename).suffix.lower() if file.filename else ""
+        document_id = ""
+
+        try:
+            document_id, document_sections = await self.process_document(file)
+            event_chains, processing_stats, layered_result = await self.extract_and_validate_event_chains(
+                document_sections,
+                apply_validation
+            )
+            return document_id, document_sections, event_chains, processing_stats, layered_result
+        finally:
+            if document_id and file_extension:
+                self.cleanup_document(document_id, file_extension)
     
     def get_document_path(self, document_id: str, file_extension: str) -> Path:
         return self.upload_dir / f"{document_id}{file_extension}"

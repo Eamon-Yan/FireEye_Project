@@ -50,7 +50,8 @@ async def process_document(
     4. 保存到Neo4j图数据库 (GraphService)
     """
     try:
-        if hasattr(file, 'size') and file.size > settings.MAX_FILE_SIZE:
+        content_length = file.headers.get("content-length") if file.headers else None
+        if content_length and int(content_length) > settings.MAX_FILE_SIZE:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail=f"文件大小超过限制 ({settings.MAX_FILE_SIZE} bytes)"
@@ -165,7 +166,8 @@ async def upload_document(
 ):
     """简单文档上传和解析（不包含事件链提取）"""
     try:
-        if hasattr(file, 'size') and file.size > settings.MAX_FILE_SIZE:
+        content_length = file.headers.get("content-length") if file.headers else None
+        if content_length and int(content_length) > settings.MAX_FILE_SIZE:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail=f"文件大小超过限制 ({settings.MAX_FILE_SIZE} bytes)"

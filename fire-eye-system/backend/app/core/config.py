@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     # 文件上传配置
     MAX_FILE_SIZE: int = 50 * 1024 * 1024  # 50MB
     UPLOAD_DIR: Path = Path("uploads")
-    ALLOWED_FILE_TYPES: List[str] = [".pdf", ".docx", ".doc", ".txt"]
+    ALLOWED_FILE_TYPES: List[str] = [".pdf", ".docx", ".txt"]
     
     # 日志配置
     LOG_LEVEL: str = "INFO"

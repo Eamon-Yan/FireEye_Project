@@ -47,7 +47,7 @@ async def verify_complete_flow():
         
         # 步骤1: 处理文档
         print("📝 步骤 1: 处理文档并提取事件链...")
-        document_id, document_sections, event_chains, processing_stats = await extraction_service.process_document_with_extraction(
+        document_id, document_sections, event_chains, processing_stats, layered_result = await extraction_service.process_document_with_extraction(
             upload_file,
             apply_validation=True
         )
@@ -56,6 +56,8 @@ async def verify_complete_flow():
         print(f"   文档ID: {document_id}")
         print(f"   章节数: {len(document_sections.sections)}")
         print(f"   事件链数: {len(event_chains)}")
+        print(f"   分层节点数: {len(layered_result.nodes) if layered_result else 0}")
+        print(f"   分层边数: {len(layered_result.edges) if layered_result else 0}")
         print(f"   验证通过率: {processing_stats.get('validation_rate', 0)*100:.1f}%")
         print()
         

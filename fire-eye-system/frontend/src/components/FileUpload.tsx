@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
 import axios from 'axios'
 
@@ -42,8 +42,28 @@ const DOCUMENT_PROCESS_ENDPOINT = API_BASE_URL
 export default function FileUpload({ onUploadSuccess, onUploadError, className }: FileUploadProps) {
   const [isDragOver, setIsDragOver] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
+  const [uploadStage, setUploadStage] = useState('')
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!isUploading) {
+      setUploadStage('')
+      return
+    }
+
+    setUploadStage('正在上传文档...')
+
+    const timers = [
+      window.setTimeout(() => setUploadStage('正在解析文档内容...'), 3000),
+      window.setTimeout(() => setUploadStage('正在提取事件链...'), 10000),
+      window.setTimeout(() => setUploadStage('正在保存图谱结果...'), 20000),
+    ]
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer))
+    }
+  }, [isUploading])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -73,7 +93,7 @@ export default function FileUpload({ onUploadSuccess, onUploadError, className }
   }, [])
 
   const handleFileUpload = async (file: File) => {
-    const allowedTypes = ['.pdf', '.docx', '.doc', '.txt']
+    const allowedTypes = ['.pdf', '.docx', '.txt']
     const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase()
 
     if (!allowedTypes.includes(fileExtension)) {
@@ -102,7 +122,7 @@ export default function FileUpload({ onUploadSuccess, onUploadError, className }
       formData.append('save_to_graph', 'true')
 
       const response = await axios.post(DOCUMENT_PROCESS_ENDPOINT, formData, {
-        timeout: 120000,
+        timeout: 300000,
       })
 
       if (response.data.status === 'success') {
@@ -163,7 +183,7 @@ setError(errorMessage)
       >
         <input
           type="file"
-          accept=".pdf,.docx,.doc,.txt"
+          accept=".pdf,.docx,.txt"
           onChange={handleFileSelect}
           style={{
             position: 'absolute',
@@ -195,7 +215,7 @@ setError(errorMessage)
                 marginBottom: '0.5rem',
               }}
             >
-              正在处理文档...
+              {uploadStage || '正在处理文档...'}
             </p>
             <p
               style={{
@@ -203,7 +223,7 @@ setError(errorMessage)
                 color: 'rgba(255, 255, 255, 0.8)',
               }}
             >
-              正在解析文档并提取事件链，请稍候
+              推荐使用内置演示样例或 1MB 以内的 DOCX/TXT，可复制文本 PDF 效果更稳定
             </p>
           </div>
         ) : (
@@ -245,7 +265,7 @@ setError(errorMessage)
                 marginBottom: '1rem',
               }}
             >
-              支持 PDF、DOCX、DOC、TXT 格式，最大 50MB
+              支持 PDF、DOCX、TXT 格式，最大 50MB，推荐 DOCX/TXT 或可复制文本 PDF
             </p>
           </div>
         )}
