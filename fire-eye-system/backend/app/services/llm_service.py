@@ -5,6 +5,7 @@ LLM集成服务
 
 import json
 import logging
+from copy import deepcopy
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
@@ -18,6 +19,8 @@ from app.schemas.extraction import (
     LayeredExtractionResult,
     ExtractedNode,
     ExtractedEdge,
+    ExtractedNodeType,
+    ExtractedRelationType,
 )
 from app.schemas.event_chain import EventChainCreate
 
@@ -76,6 +79,9 @@ class LLMService:
 5. 若文本没有明确后果，可以不强行补造 Consequence 节点。
 6. edges 中的 source / target 必须引用 nodes 中的 standard_term，且节点类型必须一致。
 7. relation 只能使用 LEADS_TO、CAUSES、RESULTS_IN 三种之一。
+8. LEADS_TO 只能用于 Hazard -> FireEvent，绝对不要用于 FireEvent -> FireEvent。
+9. 如果 source_type 和 target_type 都是 FireEvent，relation 必须使用 CAUSES。
+10. 如果 target_type 是 Consequence，优先使用 RESULTS_IN，不要把 FireEvent -> Consequence 写成 LEADS_TO。
 
 ## 输出格式：
 必须严格按照以下 JSON 格式输出，不要包含任何其他文字：
@@ -339,7 +345,8 @@ class LLMService:
             data = json.loads(llm_output)
             if "nodes" not in data or "edges" not in data:
                 raise ValueError("LLM输出格式错误：缺少nodes或edges字段")
-            
+
+            data = self._normalize_layered_result(data)
             nodes = [ExtractedNode(**node_data) for node_data in data["nodes"]]
             edges = [ExtractedEdge(**edge_data) for edge_data in data["edges"]]
             self._validate_edge_node_references(nodes, edges)
@@ -353,6 +360,60 @@ class LLMService:
         except Exception as e:
             logger.error(f"分层抽取结果解析失败: {e}")
             raise
+
+    def _normalize_layered_result(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """对LLM输出做轻量归一化，修复常见但语义明确的关系错误。"""
+        normalized = deepcopy(data)
+        edges = normalized.get("edges")
+        if not isinstance(edges, list):
+            return normalized
+
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+            self._normalize_edge_relation(edge)
+
+        return normalized
+
+    def _normalize_edge_relation(self, edge: Dict[str, Any]) -> None:
+        """归一化单条边的关系类型。"""
+        source_type = edge.get("source_type")
+        target_type = edge.get("target_type")
+        relation = edge.get("relation")
+
+        if (
+            source_type == ExtractedNodeType.FIRE_EVENT.value
+            and target_type == ExtractedNodeType.FIRE_EVENT.value
+            and relation == ExtractedRelationType.LEADS_TO.value
+        ):
+            edge["relation"] = ExtractedRelationType.CAUSES.value
+            logger.warning(
+                "检测到非法关系 FireEvent-[LEADS_TO]->FireEvent，已自动纠正为 CAUSES: %s -> %s",
+                edge.get("source", "<unknown>"),
+                edge.get("target", "<unknown>"),
+            )
+            return
+
+        if target_type == ExtractedNodeType.CONSEQUENCE.value and relation == ExtractedRelationType.LEADS_TO.value:
+            edge["relation"] = ExtractedRelationType.RESULTS_IN.value
+            logger.warning(
+                "检测到 Consequence 目标边误用 LEADS_TO，已自动纠正为 RESULTS_IN: %s -> %s",
+                edge.get("source", "<unknown>"),
+                edge.get("target", "<unknown>"),
+            )
+            return
+
+        if (
+            source_type == ExtractedNodeType.HAZARD.value
+            and target_type == ExtractedNodeType.FIRE_EVENT.value
+            and relation == ExtractedRelationType.RESULTS_IN.value
+        ):
+            edge["relation"] = ExtractedRelationType.LEADS_TO.value
+            logger.warning(
+                "检测到 Hazard->FireEvent 误用 RESULTS_IN，已自动纠正为 LEADS_TO: %s -> %s",
+                edge.get("source", "<unknown>"),
+                edge.get("target", "<unknown>"),
+            )
     
     def _validate_edge_node_references(
         self,

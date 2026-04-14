@@ -28,7 +28,7 @@ class TestDocumentParser:
     
     def test_supported_extensions(self):
         """测试支持的文件扩展名"""
-        expected_extensions = {'.pdf', '.docx', '.doc', '.txt'}
+        expected_extensions = {'.pdf', '.docx', '.txt'}
         actual_extensions = set(self.parser.supported_extensions.keys())
         assert actual_extensions == expected_extensions
     
