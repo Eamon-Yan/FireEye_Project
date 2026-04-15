@@ -434,6 +434,61 @@ class Neo4jManager:
             "relationship_id": rel_id,
             "relationship_label": relationship_label
         }
+
+    async def batch_create_event_chains(self, event_chains: List[EventChain]) -> List[Dict[str, str]]:
+        """批量创建事件链，尽量减少数据库往返次数"""
+        if not event_chains:
+            return []
+
+        descriptions = list({
+            description.strip()
+            for chain in event_chains
+            for description in (chain.source, chain.target)
+            if description and description.strip()
+        })
+
+        existing_nodes = await self._find_existing_event_nodes(descriptions)
+
+        new_nodes_by_description: Dict[str, Dict[str, Any]] = {}
+        for description in descriptions:
+            if description not in existing_nodes:
+                new_nodes_by_description[description] = self._build_event_node_payload(description)
+
+        created_nodes = await self._batch_create_event_nodes(list(new_nodes_by_description.values()))
+        for created_node in created_nodes:
+            existing_nodes[created_node["description"]] = {
+                "node_id": created_node["node_id"],
+                "node_label": created_node["node_label"],
+            }
+
+        relationship_rows: List[Dict[str, Any]] = []
+        for index, chain in enumerate(event_chains):
+            source_info = existing_nodes[chain.source]
+            target_info = existing_nodes[chain.target]
+            relationship_label = self._determine_relationship_label(
+                source_info["node_label"],
+                target_info["node_label"],
+            )
+
+            relationship_rows.append(
+                {
+                    "row_index": index,
+                    "source_node_id": source_info["node_id"],
+                    "target_node_id": target_info["node_id"],
+                    "source_node_label": source_info["node_label"],
+                    "target_node_label": target_info["node_label"],
+                    "relationship_label": relationship_label,
+                    "properties": {
+                        "id": str(uuid.uuid4()),
+                        "relation_type": chain.relation.value if hasattr(chain.relation, "value") else str(chain.relation),
+                        "confidence": chain.confidence,
+                        "context": chain.context or "",
+                        "created_at": datetime.now().isoformat(),
+                    },
+                }
+            )
+
+        return await self._batch_create_relationships(relationship_rows)
     
     async def _get_or_create_event_node(self, event_description: str) -> tuple[str, str]:
         """获取或创建事件节点，返回 (node_id, node_label)"""
@@ -456,9 +511,11 @@ class Neo4jManager:
             return result["node_id"], (labels[0] if labels else "FireEvent")
         
         # 如果不存在，根据描述内容智能分类并创建新节点
-        node_type, node_label = self._classify_event_type(event_description)
-        node_id = str(uuid.uuid4())
-        
+        node_payload = self._build_event_node_payload(event_description)
+        node_type = node_payload["event_type"]
+        node_label = node_payload["node_label"]
+        node_id = node_payload["node_id"]
+
         if node_label == "FireEvent":
             event_node = FireEventNode(
                 id=node_id,
@@ -475,6 +532,7 @@ class Neo4jManager:
             hazard_node = HazardNode(
                 id=node_id,
                 description=event_description,
+                standard_term=event_description,
                 risk_level="中",
                 location="未知"
             )
@@ -484,11 +542,200 @@ class Neo4jManager:
             consequence_node = ConsequenceNode(
                 id=node_id,
                 description=event_description,
+                standard_term=event_description,
                 impact_level="中",
                 affected_area="未知"
             )
             created_id = await self.create_consequence_node(consequence_node)
             return created_id, "Consequence"
+
+    async def _find_existing_event_nodes(self, descriptions: List[str]) -> Dict[str, Dict[str, str]]:
+        """批量查找已存在的事件节点"""
+        if not descriptions:
+            return {}
+
+        query = """
+        MATCH (n)
+        WHERE n.description IN $descriptions OR n.standard_term IN $descriptions
+        RETURN n.id AS node_id,
+               labels(n) AS labels,
+               n.description AS description,
+               n.standard_term AS standard_term
+        """
+
+        records = await self.execute_query(query, {"descriptions": descriptions})
+        results: Dict[str, Dict[str, str]] = {}
+
+        for record in records:
+            node_id = record.get("node_id")
+            labels = record.get("labels") or []
+            node_label = labels[0] if labels else "FireEvent"
+
+            for key in (record.get("description"), record.get("standard_term")):
+                if key and key not in results:
+                    results[key] = {
+                        "node_id": node_id,
+                        "node_label": node_label,
+                    }
+
+        return results
+
+    async def _batch_create_event_nodes(self, node_payloads: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """按节点类型批量创建节点"""
+        if not node_payloads:
+            return []
+
+        node_groups: Dict[str, List[Dict[str, Any]]] = {
+            "FireEvent": [],
+            "Hazard": [],
+            "Consequence": [],
+        }
+
+        for payload in node_payloads:
+            node_groups[payload["node_label"]].append(payload)
+
+        queries = {
+            "FireEvent": """
+            UNWIND $nodes AS node
+            CREATE (n:FireEvent)
+            SET n = node.properties
+            RETURN node.description AS description, n.id AS node_id, 'FireEvent' AS node_label
+            """,
+            "Hazard": """
+            UNWIND $nodes AS node
+            CREATE (n:Hazard)
+            SET n = node.properties
+            RETURN node.description AS description, n.id AS node_id, 'Hazard' AS node_label
+            """,
+            "Consequence": """
+            UNWIND $nodes AS node
+            CREATE (n:Consequence)
+            SET n = node.properties
+            RETURN node.description AS description, n.id AS node_id, 'Consequence' AS node_label
+            """,
+        }
+
+        created_nodes: List[Dict[str, str]] = []
+        for node_label, nodes in node_groups.items():
+            if not nodes:
+                continue
+            created_nodes.extend(await self.execute_query(queries[node_label], {"nodes": nodes}))
+
+        return created_nodes
+
+    async def _batch_create_relationships(self, relationship_rows: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """按关系类型批量创建关系"""
+        if not relationship_rows:
+            return []
+
+        relationship_groups: Dict[str, List[Dict[str, Any]]] = {
+            "CAUSES": [],
+            "LEADS_TO": [],
+            "RESULTS_IN": [],
+        }
+
+        for row in relationship_rows:
+            relationship_groups[row["relationship_label"]].append(row)
+
+        queries = {
+            "CAUSES": """
+            UNWIND $relationships AS rel
+            MATCH (source {id: rel.source_node_id})
+            MATCH (target {id: rel.target_node_id})
+            CREATE (source)-[r:CAUSES]->(target)
+            SET r = rel.properties
+            RETURN rel.row_index AS row_index,
+                   rel.source_node_id AS source_node_id,
+                   rel.target_node_id AS target_node_id,
+                   rel.source_node_label AS source_node_label,
+                   rel.target_node_label AS target_node_label,
+                   r.id AS relationship_id,
+                   'CAUSES' AS relationship_label
+            """,
+            "LEADS_TO": """
+            UNWIND $relationships AS rel
+            MATCH (source {id: rel.source_node_id})
+            MATCH (target {id: rel.target_node_id})
+            CREATE (source)-[r:LEADS_TO]->(target)
+            SET r = rel.properties
+            RETURN rel.row_index AS row_index,
+                   rel.source_node_id AS source_node_id,
+                   rel.target_node_id AS target_node_id,
+                   rel.source_node_label AS source_node_label,
+                   rel.target_node_label AS target_node_label,
+                   r.id AS relationship_id,
+                   'LEADS_TO' AS relationship_label
+            """,
+            "RESULTS_IN": """
+            UNWIND $relationships AS rel
+            MATCH (source {id: rel.source_node_id})
+            MATCH (target {id: rel.target_node_id})
+            CREATE (source)-[r:RESULTS_IN]->(target)
+            SET r = rel.properties
+            RETURN rel.row_index AS row_index,
+                   rel.source_node_id AS source_node_id,
+                   rel.target_node_id AS target_node_id,
+                   rel.source_node_label AS source_node_label,
+                   rel.target_node_label AS target_node_label,
+                   r.id AS relationship_id,
+                   'RESULTS_IN' AS relationship_label
+            """,
+        }
+
+        results: List[Dict[str, str]] = []
+        for relationship_label, rows in relationship_groups.items():
+            if not rows:
+                continue
+            results.extend(await self.execute_query(queries[relationship_label], {"relationships": rows}))
+
+        results.sort(key=lambda item: item["row_index"])
+        for item in results:
+            item.pop("row_index", None)
+
+        return results
+
+    def _build_event_node_payload(self, event_description: str) -> Dict[str, Any]:
+        """根据事件描述构建待创建节点载荷"""
+        node_type, node_label = self._classify_event_type(event_description)
+        node_id = str(uuid.uuid4())
+        timestamp = datetime.now().isoformat()
+
+        base_properties = {
+            "id": node_id,
+            "description": event_description,
+            "standard_term": event_description,
+            "created_at": timestamp,
+            "updated_at": timestamp,
+        }
+
+        if node_label == "FireEvent":
+            properties = {
+                **base_properties,
+                "event_type": node_type,
+                "category": "未分类",
+                "severity_level": 5,
+                "frequency": 1,
+            }
+        elif node_label == "Hazard":
+            properties = {
+                **base_properties,
+                "risk_level": "中",
+                "location": "未知",
+            }
+        else:
+            properties = {
+                **base_properties,
+                "impact_level": "中",
+                "affected_area": "未知",
+            }
+
+        return {
+            "description": event_description,
+            "node_id": node_id,
+            "node_label": node_label,
+            "event_type": node_type,
+            "properties": properties,
+        }
     
     def _determine_relationship_label(self, source_label: str, target_label: str) -> str:
         """根据源/目标节点类型确定关系类型，保证结构符合 隐患 -> 火灾事件 -> 后果"""

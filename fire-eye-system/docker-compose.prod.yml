@@ -1,11 +1,10 @@
 services:
-  # Neo4j 图数据库
   neo4j:
     image: neo4j:5.15-community
     container_name: fire-eye-neo4j
     ports:
-      - "7474:7474"  # HTTP
-      - "7687:7687"  # Bolt
+      - "7474:7474"
+      - "7687:7687"
     environment:
       - NEO4J_dbms_security_procedures_unrestricted=apoc.*
       - NEO4J_server_memory_heap_initial__size=512m
@@ -26,12 +25,9 @@ services:
       retries: 10
       start_period: 30s
 
-  # Redis 缓存
   redis:
     image: redis:7-alpine
     container_name: fire-eye-redis
-    # ports:
-    #   - "6379:6379"
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
@@ -44,11 +40,10 @@ services:
       timeout: 10s
       retries: 5
 
-  # 后端 API 服务
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile.prod
     container_name: fire-eye-backend
     ports:
       - "8000:8000"
@@ -60,7 +55,6 @@ services:
       - REDIS_PORT=6379
       - OPENAI_API_KEY=${OPENAI_API_KEY}
     volumes:
-      - ./backend:/app
       - backend_uploads:/app/uploads
     depends_on:
       neo4j:
@@ -70,55 +64,30 @@ services:
     networks:
       - fire-eye-network
     restart: unless-stopped
-    develop:
-      watch:
-        - action: sync
-          path: ./backend
-          target: /app
-          ignore:
-            - __pycache__/
-            - .pytest_cache/
-            - .mypy_cache/
 
-  # 前端 Web 应用
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile.prod
     container_name: fire-eye-frontend
     ports:
       - "5000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=
-      - WATCHPACK_POLLING=true
-      - CHOKIDAR_USEPOLLING=true
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
     depends_on:
       backend:
         condition: service_healthy
     networks:
       - fire-eye-network
     restart: unless-stopped
-    develop:
-      watch:
-        - action: sync
-          path: ./frontend
-          target: /app
-          ignore:
-            - node_modules/
-            - .next/
 
- # 新增 AstrBot 服务
   astrbot:
     image: soulter/astrbot:latest
     container_name: astrbot
     ports:
-      - "6125:6185"  # 网页管理后台端口
+      - "6125:6185"
     volumes:
-      - ./astrbot_data:/AstrBot/data  # 把插件和配置挂载出来，方便你放 Agent 写的代码
+      - ./astrbot_data:/AstrBot/data
     restart: unless-stopped
     depends_on:
       redis:

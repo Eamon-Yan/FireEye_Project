@@ -2,6 +2,7 @@
 智能抽取服务相关模型
 """
 
+import logging
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from pydantic import Field, field_validator, model_validator
@@ -9,6 +10,8 @@ from enum import Enum
 
 from .base import BaseSchema, TimestampMixin
 from .event_chain import EventChain, EventChainCreate, RelationType
+
+logger = logging.getLogger(__name__)
 
 
 class ProcessingStatus(str, Enum):
@@ -129,8 +132,11 @@ class ExtractedEdge(BaseSchema):
         }
         triple = (self.source_type, self.relation, self.target_type)
         if triple not in allowed:
-            raise ValueError(
-                f"不支持的分层关系: {self.source_type} -[{self.relation}]-> {self.target_type}"
+            logger.warning(
+                "非标准关系组合（已放行）: %s -[%s]-> %s",
+                self.source_type.value if hasattr(self.source_type, 'value') else self.source_type,
+                self.relation.value if hasattr(self.relation, 'value') else self.relation,
+                self.target_type.value if hasattr(self.target_type, 'value') else self.target_type,
             )
         return self
 

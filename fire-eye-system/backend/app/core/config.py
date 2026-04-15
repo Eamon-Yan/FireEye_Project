@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     ASTRBOT_API_KEYS: Union[List[str], str] = []
     
     # 开发环境配置
-    DEBUG: bool = False
+    DEBUG: bool = True
     
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod

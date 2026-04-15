@@ -153,11 +153,94 @@ async def process_document(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"文档处理失败: {e}")
+        error_msg = str(e)
+        logger.error(f"文档处理失败: {error_msg}")
+        user_friendly_detail = _classify_error(error_msg)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"文档处理失败: {str(e)}"
+            detail=user_friendly_detail
         )
+
+
+def _classify_error(error_msg: str) -> str:
+    error_msg_lower = error_msg.lower()
+
+    if any(x in error_msg_lower for x in [
+        'json decode', 'json解析', 'json.decoder', 'json.decodererror'
+    ]):
+        return (
+            '文档内容解析失败：LLM返回的响应格式异常。'
+            '这通常是模型输出不稳定导致的，建议稍后重试上传同一文档，'
+            '或尝试使用更规范的火灾事故报告文本。'
+        )
+
+    if any(x in error_msg_lower for x in [
+        'validation error', '格式验证失败', '验证失败', 'extractededge', 'extractednode'
+    ]):
+        return (
+            '事件链结构解析失败：模型返回的图谱结构不符合规范。'
+            '系统已尝试自动修复常见错误，如问题持续，请确保文档内容清晰描述了'
+            '完整的火灾事故经过、原因和后果。'
+        )
+
+    if any(x in error_msg_lower for x in [
+        '缺少nodes', '缺少edges', 'nodes或edges', '缺少event_chains', 'event_chains字段'
+    ]):
+        return (
+            '事件链提取失败：未能从文档中识别出足够的事件关系。'
+            '请确认文档包含清晰的因果描述，例如：'
+            '电气线路老化导致短路，短路引燃可燃物，火势蔓延造成损失。'
+        )
+
+    if any(x in error_msg_lower for x in [
+        '文档解析失败', 'pdf解析', 'docx解析', 'txt解析', 'pdf文件解析', 'docx文件解析', 'txt文件解析'
+    ]):
+        return (
+            '文档内容解析失败：无法提取文档中的文本内容。'
+            '请确保上传的是文本型PDF（不是扫描图片）、标准DOCX格式或UTF-8编码的TXT文件。'
+        )
+
+    if any(x in error_msg_lower for x in [
+        '文档内容过短', '内容为空', '内容过短', '有效内容'
+    ]):
+        return (
+            '文档内容不足：提取的文本过短或几乎为空。'
+            '请上传包含完整火灾事故描述的文档，建议字数不少于200字。'
+        )
+
+    if any(x in error_msg_lower for x in [
+        'openai_api_key', 'api_key', 'llm', '模型', 'api错误', 'api调用'
+    ]):
+        return (
+            'AI服务调用失败：LLM服务配置异常或网络问题。'
+            '请检查后端服务的OPENAI_API_KEY等LLM配置是否正确。'
+        )
+
+    if any(x in error_msg_lower for x in [
+        '超时', 'timeout', 'timeouterror', 'timed out'
+    ]):
+        return (
+            '处理超时：文档处理耗时过长。'
+            '建议使用更小的文档（不超过1MB），或稍后重试。'
+        )
+
+    if any(x in error_msg_lower for x in [
+        '图数据库', 'neo4j', 'graph', '保存到图', '图存储'
+    ]):
+        return (
+            '图数据库保存失败：事件链已提取成功，但保存到图数据库时出现问题。'
+            '这不影响本次提取结果，可稍后重试或检查Neo4j服务状态。'
+        )
+
+    if any(x in error_msg_lower for x in [
+        'section', '章节', '章节验证', 'required_sections'
+    ]):
+        return (
+            '文档章节验证失败：未找到必需的章节结构。'
+            '建议文档包含事故经过、原因分析等标准章节标题。'
+        )
+
+    return f'文档处理失败：{error_msg}'
 
 
 @router.post("/upload", response_model=BaseResponse)

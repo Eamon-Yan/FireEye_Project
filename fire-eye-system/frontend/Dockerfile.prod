@@ -1,5 +1,5 @@
 # 使用官方 Node.js 18 镜像
-FROM node:18-alpine
+FROM node:18-alpine AS builder
 
 # 设置工作目录
 WORKDIR /app
@@ -17,8 +17,17 @@ COPY . .
 RUN npm run build
 RUN cp -r .next/static .next/standalone/.next/static
 
-# 切换到 standalone 运行目录
-WORKDIR /app/.next/standalone
+FROM node:18-alpine AS runner
+
+# 设置工作目录
+WORKDIR /app
+
+# 设置生产环境
+ENV NODE_ENV=production
+
+# 从构建阶段复制产物
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
 
 # 暴露端口
 EXPOSE 3000

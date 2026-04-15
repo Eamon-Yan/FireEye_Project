@@ -172,18 +172,38 @@ class GraphService:
     
     async def batch_create_event_chains(self, event_chains: List[EventChainCreate]) -> List[Dict[str, str]]:
         """批量创建事件链"""
+        if not event_chains:
+            return []
+
+        normalized_chains = [
+            EventChain(
+                source=chain.source,
+                relation=chain.relation,
+                target=chain.target,
+                confidence=chain.confidence,
+                timestamp=chain.timestamp,
+                context=chain.context or "",
+            )
+            for chain in event_chains
+        ]
+
+        try:
+            results = await self.neo4j.batch_create_event_chains(normalized_chains)
+            logger.info(f"批量创建事件链完成: {len(results)}/{len(event_chains)}")
+            return results
+        except Exception as e:
+            logger.error(f"批量写入事件链失败，回退为逐条写入: {e}")
+
         results = []
-        
         for chain in event_chains:
             try:
                 result = await self.create_event_chain(chain)
                 results.append(result)
             except Exception as e:
                 logger.error(f"批量创建事件链失败: {chain.source} -> {chain.target}, 错误: {e}")
-                # 继续处理其他事件链
                 continue
-        
-        logger.info(f"批量创建事件链完成: {len(results)}/{len(event_chains)}")
+
+        logger.info(f"回退逐条创建事件链完成: {len(results)}/{len(event_chains)}")
         return results
     
     # ===== 查询操作 =====

@@ -348,7 +348,7 @@ class LLMService:
 
             data = self._normalize_layered_result(data)
             nodes = [ExtractedNode(**node_data) for node_data in data["nodes"]]
-            edges = [ExtractedEdge(**edge_data) for edge_data in data["edges"]]
+            edges = [ExtractedEdge(**edge_data) for edge_data in data["edges"] if not edge_data.get("_invalid")]
             self._validate_edge_node_references(nodes, edges)
             return LayeredExtractionResult(nodes=nodes, edges=edges)
         except json.JSONDecodeError as e:
@@ -377,9 +377,12 @@ class LLMService:
 
     def _normalize_edge_relation(self, edge: Dict[str, Any]) -> None:
         """归一化单条边的关系类型。"""
-        source_type = edge.get("source_type")
-        target_type = edge.get("target_type")
-        relation = edge.get("relation")
+        source_type = edge.get("source_type", "")
+        target_type = edge.get("target_type", "")
+        relation = edge.get("relation", "")
+
+        if not source_type or not target_type or not relation:
+            return
 
         if (
             source_type == ExtractedNodeType.FIRE_EVENT.value
@@ -414,7 +417,26 @@ class LLMService:
                 edge.get("source", "<unknown>"),
                 edge.get("target", "<unknown>"),
             )
-    
+            return
+
+        if source_type == ExtractedNodeType.CONSEQUENCE.value:
+            edge["_invalid"] = True
+            logger.warning(
+                "检测到 Consequence 作为源节点的非法关系，已自动过滤: %s -> %s",
+                edge.get("source", "<unknown>"),
+                edge.get("target", "<unknown>"),
+            )
+            return
+
+        if target_type == ExtractedNodeType.HAZARD.value:
+            edge["relation"] = ExtractedRelationType.RESULTS_IN.value
+            logger.warning(
+                "检测到 Hazard 作为目标节点的非法关系，已自动纠正为 RESULTS_IN: %s -> %s",
+                edge.get("source", "<unknown>"),
+                edge.get("target", "<unknown>"),
+            )
+            return
+
     def _validate_edge_node_references(
         self,
         nodes: List[ExtractedNode],
