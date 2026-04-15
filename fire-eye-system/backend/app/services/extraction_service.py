@@ -400,16 +400,52 @@ class ExtractionService:
         return valid_chains, processing_stats, layered_result
     
     async def process_document_with_extraction(
-        self,
-        file: UploadFile,
-        apply_validation: bool = True
-    ) -> Tuple[str, DocumentSections, List[EventChainCreate], Dict[str, Any], Optional[LayeredExtractionResult]]:
-        """完整的文档处理流程：上传 -> 解析 -> 章节提取 -> 事件链提取 -> 验证"""
-        file_extension = Path(file.filename).suffix.lower() if file.filename else ""
-        document_id = ""
+        self, 
+        file: UploadFile, 
+        apply_validation: bool = True,
+        document_id: Optional[str] = None
+    ) -> Tuple[str, DocumentSections, List[EventChainCreate], Dict, Optional[LayeredExtractionResult]]:
+        """
+        处理文档并使用LLM提取分层事件链 (集成校验)
+        """
+        filename = file.filename or ""
+        file_extension = Path(filename).suffix.lower() if filename else ""
+        document_sections: Optional[DocumentSections] = None
 
         try:
-            document_id, document_sections = await self.process_document(file)
+            # 如果没有传入 document_id，则复用标准文档处理逻辑
+            if not document_id:
+                document_id, document_sections = await self.process_document(file)
+            else:
+                # 如果传入了 ID，则手动执行保存文件和提取章节的逻辑
+                if not filename:
+                    raise HTTPException(status_code=400, detail="文件名不能为空")
+
+                if file_extension not in self.parser.supported_extensions:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"不支持的文件类型: {file_extension}"
+                    )
+
+                file_type = self.parser.supported_extensions[file_extension]
+                file_path = self.upload_dir / f"{document_id}{file_extension}"
+
+                with open(file_path, "wb") as buffer:
+                    content = await file.read()
+                    if len(content) > settings.MAX_FILE_SIZE:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=f"文件大小超过限制 ({settings.MAX_FILE_SIZE} bytes)"
+                        )
+                    buffer.write(content)
+
+                text_content = self.parser.parse_document(str(file_path), file_type)
+                sections_dict = self.extractor.extract_sections(text_content)
+                document_sections = DocumentSections(sections=sections_dict)
+
+            if document_sections is None:
+                raise HTTPException(status_code=500, detail="文档章节提取失败")
+
             event_chains, processing_stats, layered_result = await self.extract_and_validate_event_chains(
                 document_sections,
                 apply_validation

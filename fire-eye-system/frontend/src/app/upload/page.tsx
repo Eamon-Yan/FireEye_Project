@@ -1,472 +1,184 @@
 'use client'
 
-import React, { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import { ArrowLeft, FileText, TrendingUp, Home, Eye } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import Link from 'next/link'
+import { ArrowRight, FileText, Flame, LineChart, Network } from 'lucide-react'
+import Layout from '@/components/Layout'
 import FileUpload from '@/components/FileUpload'
+import type { EventChain, UploadResult } from '@/types/upload'
+
+const processSteps = [
+  {
+    title: '文档解析',
+    description: '提取章节与段落结构，为后续事件链抽取建立上下文。',
+    icon: FileText,
+  },
+  {
+    title: '事件抽取与校验',
+    description: '通过 LLM 提炼事件关系，执行逻辑验证和术语归一化。',
+    icon: Flame,
+  },
+  {
+    title: '图谱构建',
+    description: '将有效链路写入图数据库，用于图谱浏览与关系检索。',
+    icon: Network,
+  },
+]
+
+function confidenceTone(confidence: number) {
+  if (confidence >= 0.8) return 'bg-emerald-100 text-emerald-700'
+  if (confidence >= 0.6) return 'bg-amber-100 text-amber-700'
+  return 'bg-rose-100 text-rose-700'
+}
 
 export default function UploadPage() {
-  const router = useRouter()
-  const [uploadResult, setUploadResult] = useState<any>(null)
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
 
-  const handleUploadSuccess = (result: any) => {
-    setUploadResult(result)
-  }
-
-  const handleUploadError = (error: string) => {
-    console.error('Upload error:', error)
-  }
+  const topChains = useMemo<EventChain[]>(() => {
+    return uploadResult?.event_chains?.chains?.slice(0, 10) ?? []
+  }, [uploadResult])
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      position: 'relative',
-    }}>
-      {/* 顶部导航栏 */}
-      <div style={{
-        position: 'sticky',
-        top: 0,
-        zIndex: 10,
-        backgroundColor: 'rgba(255, 255, 255, 0.15)',
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
-        borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
-      }}>
-        <div style={{
-          maxWidth: '80rem',
-          margin: '0 auto',
-          padding: '0 1.5rem',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          height: '4rem',
-        }}>
-          <button
-            onClick={() => router.push('/')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              color: 'white',
-              backgroundColor: 'rgba(255, 255, 255, 0.2)',
-              border: '1px solid rgba(255, 255, 255, 0.3)',
-              borderRadius: '0.5rem',
-              padding: '0.5rem 1rem',
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-              fontWeight: '500',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.3)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.2)'
-            }}
-          >
-            <Home style={{ width: '1.25rem', height: '1.25rem' }} />
-            返回主页
-          </button>
-          
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-          }}>
-            <span style={{ fontSize: '1.5rem' }}>🔥</span>
-            <h1 style={{
-              fontSize: '1.5rem',
-              fontWeight: 'bold',
-              color: 'white',
-              margin: 0,
-            }}>
-              文档上传
-            </h1>
+    <Layout>
+      <section className="app-shell py-8 sm:py-10 lg:py-12">
+        <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="space-y-8">
+            <div className="surface-panel-strong overflow-hidden rounded-[2rem] px-6 py-8 sm:px-8 sm:py-10">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                <div className="max-w-2xl">
+                  <span className="eyebrow">Upload Workflow</span>
+                  <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
+                    上传火灾调查报告并生成事理图谱
+                  </h1>
+                  <p className="mt-3 text-sm leading-8 text-slate-600 sm:text-base">
+                    页面聚焦清晰的输入流程、处理结果反馈与后续跳转，减少原先过于依赖玻璃态和内联样式造成的信息噪音。
+                  </p>
+                </div>
+
+                <Link href="/graph" className="btn-secondary">
+                  <Network className="h-4 w-4" />
+                  直接查看图谱
+                </Link>
+              </div>
+
+              <div className="mt-8 grid gap-4 md:grid-cols-3">
+                {processSteps.map(({ title, description, icon: Icon }) => (
+                  <div key={title} className="rounded-[1.75rem] border border-slate-900/8 bg-white/70 p-5">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white">
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <h2 className="mt-4 text-lg font-semibold text-slate-950">{title}</h2>
+                    <p className="mt-2 text-sm leading-7 text-slate-600">{description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <FileUpload onUploadSuccess={setUploadResult} onUploadError={() => undefined} />
+
+            <div className="surface-panel rounded-[2rem] p-6 sm:p-7">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-primary-700">
+                  <LineChart className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-semibold text-slate-950">处理说明</h2>
+                  <p className="mt-1 text-sm text-slate-600">上传前后建议关注的关键点。</p>
+                </div>
+              </div>
+
+              <div className="mt-6 grid gap-4 md:grid-cols-2">
+                <div className="rounded-[1.5rem] border border-slate-900/8 bg-white/70 p-5">
+                  <div className="text-sm font-semibold text-slate-900">推荐输入</div>
+                  <ul className="mt-4 space-y-3 text-sm leading-7 text-slate-600">
+                    <li>优先使用 DOCX、TXT，或包含可复制文本层的 PDF。</li>
+                    <li>若文档特别长，建议先选择结构完整、案例集中的报告进行展示。</li>
+                    <li>上传前确认章节标题和段落信息较完整，便于上下文抽取。</li>
+                  </ul>
+                </div>
+
+                <div className="rounded-[1.5rem] border border-slate-900/8 bg-white/70 p-5">
+                  <div className="text-sm font-semibold text-slate-900">处理后建议</div>
+                  <ul className="mt-4 space-y-3 text-sm leading-7 text-slate-600">
+                    <li>优先关注有效事件链数、验证通过率和平均置信度。</li>
+                    <li>若事件链过少，可检查文档是否为扫描版图片 PDF。</li>
+                    <li>处理完成后进入图谱页，结合搜索和节点详情进行演示。</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <button
-            onClick={() => router.push('/graph')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              color: 'white',
-              backgroundColor: 'rgba(251, 146, 60, 0.9)',
-              border: '1px solid rgba(255, 255, 255, 0.3)',
-              borderRadius: '0.5rem',
-              padding: '0.5rem 1rem',
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-              fontWeight: '500',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(251, 146, 60, 1)'
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(251, 146, 60, 0.9)'
-            }}
-          >
-            <Eye style={{ width: '1.25rem', height: '1.25rem' }} />
-            查看图谱
-          </button>
-        </div>
-      </div>
+          <aside className="space-y-6">
+            <div className="surface-panel rounded-[2rem] p-6">
+              <span className="eyebrow">Result Snapshot</span>
+              <h2 className="mt-4 text-xl font-semibold text-slate-950">结果摘要</h2>
+              <p className="mt-2 text-sm leading-7 text-slate-600">
+                成功上传后，此区域展示最新处理结果的关键摘要，便于演示时快速讲解。
+              </p>
 
-      {/* 主内容区域 */}
-      <div style={{
-        maxWidth: '64rem',
-        margin: '0 auto',
-        padding: '3rem 1.5rem',
-      }}>
-        {/* 页面标题 */}
-        <div style={{
-          textAlign: 'center',
-          marginBottom: '3rem',
-        }}>
-          <h1 style={{
-            fontSize: '2.25rem',
-            fontWeight: 'bold',
-            color: 'white',
-            marginBottom: '1rem',
-          }}>
-            上传火灾调查报告
-          </h1>
-          <p style={{
-            fontSize: '1.125rem',
-            color: 'rgba(255, 255, 255, 0.9)',
-          }}>
-            上传您的火灾调查报告，系统将自动提取事件链并构建事理图谱
-          </p>
-        </div>
-
-        {/* 上传组件 */}
-        <div style={{ marginBottom: '2rem' }}>
-          <FileUpload
-            onUploadSuccess={handleUploadSuccess}
-            onUploadError={handleUploadError}
-          />
-        </div>
-
-        {/* 处理结果 */}
-        {uploadResult && (
-          <div style={{
-            backgroundColor: 'rgba(255, 255, 255, 0.15)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            borderRadius: '1rem',
-            padding: '2rem',
-            border: '1px solid rgba(255, 255, 255, 0.2)',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
-          }}>
-            <h2 style={{
-              fontSize: '1.5rem',
-              fontWeight: '600',
-              color: 'white',
-              marginBottom: '1.5rem',
-            }}>
-              处理结果
-            </h2>
-            
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(20rem, 1fr))',
-              gap: '1.5rem',
-              marginBottom: '1.5rem',
-            }}>
-              {/* 文档信息 */}
-              <div style={{
-                backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                borderRadius: '0.75rem',
-                padding: '1.5rem',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-              }}>
-                <h3 style={{
-                  fontWeight: '600',
-                  color: 'white',
-                  marginBottom: '1rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                }}>
-                  <FileText style={{ width: '1.25rem', height: '1.25rem' }} />
-                  文档信息
-                </h3>
-                <div style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.75rem',
-                  fontSize: '0.875rem',
-                  color: 'rgba(255, 255, 255, 0.9)',
-                }}>
-                  <div>
-                    <span style={{ fontWeight: '500' }}>文件名: </span>
-                    {uploadResult.filename}
+              <div className="mt-5 space-y-3">
+                <div className="rounded-2xl bg-white/70 px-4 py-4">
+                  <div className="text-sm text-slate-500">当前文档</div>
+                  <div className="mt-2 text-sm font-semibold text-slate-900 break-all">
+                    {uploadResult?.filename ?? '尚未上传文档'}
                   </div>
-                  <div>
-                    <span style={{ fontWeight: '500' }}>文档ID: </span>
-                    {uploadResult.document_id}
-                  </div>
-                  <div>
-                    <span style={{ fontWeight: '500' }}>文件类型: </span>
-                    {uploadResult.file_type}
-                  </div>
-                  <div>
-                    <span style={{ fontWeight: '500' }}>章节数量: </span>
-                    {uploadResult.document_sections?.section_count || 0}
+                </div>
+                <div className="rounded-2xl bg-white/70 px-4 py-4">
+                  <div className="text-sm text-slate-500">事件链数量</div>
+                  <div className="mt-2 text-2xl font-semibold text-slate-950">{uploadResult?.event_chains?.count ?? 0}</div>
+                </div>
+                <div className="rounded-2xl bg-white/70 px-4 py-4">
+                  <div className="text-sm text-slate-500">验证通过率</div>
+                  <div className="mt-2 text-2xl font-semibold text-slate-950">
+                    {uploadResult?.processing_statistics
+                      ? `${(uploadResult.processing_statistics.validation_rate * 100).toFixed(1)}%`
+                      : '--'}
                   </div>
                 </div>
               </div>
 
-              {/* 处理统计 */}
-              {uploadResult.processing_statistics && (
-                <div style={{
-                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                  borderRadius: '0.75rem',
-                  padding: '1.5rem',
-                  border: '1px solid rgba(255, 255, 255, 0.2)',
-                }}>
-                  <h3 style={{
-                    fontWeight: '600',
-                    color: 'white',
-                    marginBottom: '1rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                  }}>
-                    <TrendingUp style={{ width: '1.25rem', height: '1.25rem' }} />
-                    处理统计
-                  </h3>
-                  <div style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '0.75rem',
-                    fontSize: '0.875rem',
-                    color: 'rgba(255, 255, 255, 0.9)',
-                  }}>
-                    <div>
-                      <span style={{ fontWeight: '500' }}>原始事件链: </span>
-                      {uploadResult.processing_statistics.raw_chains}
-                    </div>
-                    <div>
-                      <span style={{ fontWeight: '500' }}>有效事件链: </span>
-                      {uploadResult.processing_statistics.valid_chains}
-                    </div>
-                    <div>
-                      <span style={{ fontWeight: '500' }}>验证通过率: </span>
-                      {(uploadResult.processing_statistics.validation_rate * 100).toFixed(1)}%
-                    </div>
-                    <div>
-                      <span style={{ fontWeight: '500' }}>平均置信度: </span>
-                      {uploadResult.processing_statistics.avg_confidence.toFixed(2)}
-                    </div>
-                  </div>
-                </div>
-              )}
+              <div className="mt-6">
+                <Link href="/graph" className="btn-primary w-full justify-center">
+                  查看图谱结果
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
             </div>
 
-            {/* 事件链列表 */}
-            {uploadResult.event_chains && uploadResult.event_chains.chains && (
-              <div style={{ marginBottom: '1.5rem' }}>
-                <h3 style={{
-                  fontWeight: '600',
-                  color: 'white',
-                  marginBottom: '1rem',
-                }}>
-                  提取的事件链 ({uploadResult.event_chains.count} 个)
-                </h3>
-                <div style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.75rem',
-                  maxHeight: '24rem',
-                  overflowY: 'auto',
-                }}>
-                  {uploadResult.event_chains.chains.slice(0, 10).map((chain: any, index: number) => (
-                    <div key={index} style={{
-                      backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                      borderRadius: '0.75rem',
-                      padding: '1rem',
-                      border: '1px solid rgba(255, 255, 255, 0.2)',
-                    }}>
-                      <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        flexWrap: 'wrap',
-                        gap: '0.5rem',
-                      }}>
-                        <div style={{ flex: 1, minWidth: '20rem' }}>
-                          <div style={{ fontSize: '0.875rem', color: 'white' }}>
-                            <span style={{ fontWeight: '600', color: '#f43f5e' }}>{chain.source}</span>
-                            <span style={{ margin: '0 0.5rem', color: 'rgba(255, 255, 255, 0.7)' }}>
-                              → {chain.relation} →
-                            </span>
-                            <span style={{ fontWeight: '600', color: '#a78bfa' }}>{chain.target}</span>
-                          </div>
-                          {chain.context && (
-                            <p style={{
-                              fontSize: '0.75rem',
-                              color: 'rgba(255, 255, 255, 0.7)',
-                              marginTop: '0.5rem',
-                            }}>
-                              {chain.context}
-                            </p>
-                          )}
+            <div className="surface-panel rounded-[2rem] p-6">
+              <h2 className="text-xl font-semibold text-slate-950">事件链预览</h2>
+              <p className="mt-2 text-sm leading-7 text-slate-600">默认展示前 10 条链路，突出高置信度结果。</p>
+
+              <div className="mt-5 space-y-3">
+                {topChains.length > 0 ? (
+                  topChains.map((chain, index) => (
+                    <div key={`${chain.source}-${chain.target}-${index}`} className="rounded-[1.5rem] border border-slate-900/8 bg-white/70 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="text-sm leading-7 text-slate-700">
+                          <span className="font-semibold text-primary-700">{chain.source}</span>
+                          <span className="mx-2 text-slate-400">→ {chain.relation} →</span>
+                          <span className="font-semibold text-sky-700">{chain.target}</span>
                         </div>
-                        <div>
-                          <span style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            padding: '0.25rem 0.75rem',
-                            borderRadius: '9999px',
-                            fontSize: '0.75rem',
-                            fontWeight: '600',
-                            backgroundColor: 'rgba(251, 146, 60, 0.9)',
-                            color: 'white',
-                          }}>
-                            {(chain.confidence * 100).toFixed(0)}%
-                          </span>
-                        </div>
+                        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${confidenceTone(chain.confidence)}`}>
+                          {(chain.confidence * 100).toFixed(0)}%
+                        </span>
                       </div>
+                      {chain.context && (
+                        <p className="mt-3 text-sm leading-7 text-slate-500">{chain.context}</p>
+                      )}
                     </div>
-                  ))}
-                  {uploadResult.event_chains.chains.length > 10 && (
-                    <p style={{
-                      fontSize: '0.875rem',
-                      color: 'rgba(255, 255, 255, 0.7)',
-                      textAlign: 'center',
-                    }}>
-                      还有 {uploadResult.event_chains.chains.length - 10} 个事件链...
-                    </p>
-                  )}
-                </div>
+                  ))
+                ) : (
+                  <div className="rounded-[1.5rem] border border-dashed border-slate-300 bg-white/55 px-5 py-8 text-center text-sm leading-7 text-slate-500">
+                    上传成功后，这里会展示提取到的事件链摘要。
+                  </div>
+                )}
               </div>
-            )}
-
-            {/* 操作按钮 */}
-            <div style={{
-              display: 'flex',
-              justifyContent: 'center',
-              gap: '1rem',
-              flexWrap: 'wrap',
-            }}>
-              <button
-                onClick={() => router.push('/graph')}
-                style={{
-                  backgroundColor: 'rgba(251, 146, 60, 0.9)',
-                  color: 'white',
-                  padding: '0.75rem 2rem',
-                  borderRadius: '0.5rem',
-                  border: '1px solid rgba(255, 255, 255, 0.3)',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  fontSize: '1rem',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgba(251, 146, 60, 1)'
-                  e.currentTarget.style.transform = 'translateY(-2px)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgba(251, 146, 60, 0.9)'
-                  e.currentTarget.style.transform = 'translateY(0)'
-                }}
-              >
-                查看图谱
-              </button>
-              <button
-                onClick={() => setUploadResult(null)}
-                style={{
-                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                  color: 'white',
-                  padding: '0.75rem 2rem',
-                  borderRadius: '0.5rem',
-                  border: '1px solid rgba(255, 255, 255, 0.3)',
-                  cursor: 'pointer',
-                  fontWeight: '600',
-                  fontSize: '1rem',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.3)'
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.2)'
-                }}
-              >
-                继续上传
-              </button>
             </div>
-          </div>
-        )}
-
-        {/* 使用说明 */}
-        <div style={{
-          marginTop: '3rem',
-          backgroundColor: 'rgba(255, 255, 255, 0.15)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          borderRadius: '1rem',
-          padding: '2rem',
-          border: '1px solid rgba(255, 255, 255, 0.2)',
-        }}>
-          <h2 style={{
-            fontSize: '1.25rem',
-            fontWeight: '600',
-            color: 'white',
-            marginBottom: '1.5rem',
-          }}>
-            使用说明
-          </h2>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(20rem, 1fr))',
-            gap: '2rem',
-            fontSize: '0.875rem',
-            color: 'rgba(255, 255, 255, 0.9)',
-          }}>
-            <div>
-              <h3 style={{
-                fontWeight: '600',
-                marginBottom: '0.75rem',
-                color: 'white',
-              }}>
-                支持的文件格式
-              </h3>
-              <ul style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.5rem',
-                paddingLeft: '1.25rem',
-              }}>
-                <li>PDF 文档 (.pdf)</li>
-                <li>Word 文档 (.docx, .doc)</li>
-                <li>纯文本文件 (.txt)</li>
-              </ul>
-            </div>
-            <div>
-              <h3 style={{
-                fontWeight: '600',
-                marginBottom: '0.75rem',
-                color: 'white',
-              }}>
-                处理流程
-              </h3>
-              <ul style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.5rem',
-                paddingLeft: '1.25rem',
-              }}>
-                <li>文档解析和章节提取</li>
-                <li>LLM 智能事件链抽取</li>
-                <li>术语归一化和逻辑校验</li>
-                <li>存储到 Neo4j 图数据库</li>
-              </ul>
-            </div>
-          </div>
+          </aside>
         </div>
-      </div>
-    </div>
+      </section>
+    </Layout>
   )
 }

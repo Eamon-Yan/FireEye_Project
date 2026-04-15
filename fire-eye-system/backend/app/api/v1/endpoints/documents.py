@@ -3,15 +3,18 @@
 集成完整的文档处理工作流：解析 -> 提取 -> 验证 -> 存储
 """
 
+import uuid
 import logging
-from typing import List, Dict, Any
+from datetime import datetime
+from typing import List, Dict, Any, Optional
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, BackgroundTasks
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.schemas.base import BaseResponse, ResponseStatus
+from app.db.redis_client import redis_client
 from app.schemas.document import (
     Document,
     DocumentCreate,
@@ -33,21 +36,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+async def _set_task_status(document_id: str, payload: Dict[str, Any], expire: int = 3600) -> None:
+    await redis_client.set(f"task:{document_id}", payload, expire=expire)
+
+
 @router.post("/process", response_model=BaseResponse)
 async def process_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="上传的文档文件"),
     apply_validation: bool = True,
     save_to_graph: bool = True,
     graph_service: GraphService = GraphServiceDep
 ):
     """
-    统一文档处理端点
+    统一文档处理端点 (异步任务版)
     
     完整工作流程：
-    1. 解析文档并提取章节 (ExtractionService)
-    2. 使用LLM提取分层事件图并映射事件链 (LLMService)
-    3. 验证和归一化事件链 (ValidationService)
-    4. 保存到Neo4j图数据库 (GraphService)
+    1. 立即返回 document_id 和状态
+    2. 后台执行：解析 -> 提取 -> 验证 -> 存储
     """
     try:
         content_length = file.headers.get("content-length") if file.headers else None
@@ -70,96 +76,160 @@ async def process_document(
                 detail=f"不支持的文件类型: {file_extension}"
             )
         
-        logger.info(f"开始处理文档: {file.filename}")
-        document_id, document_sections, event_chains, processing_stats, layered_result = await extraction_service.process_document_with_extraction(
-            file,
-            apply_validation=apply_validation
-        )
+        document_id = str(uuid.uuid4())
         
-        logger.info(f"文档处理完成: {document_id}, 提取到 {len(event_chains)} 个有效事件链")
-        
-        graph_results = None
-        if save_to_graph and event_chains:
-            try:
-                logger.info("开始保存事件链到图数据库...")
-                graph_results = await graph_service.batch_create_event_chains(event_chains)
-                logger.info(f"成功保存 {len(graph_results)} 个事件链到图数据库")
-            except Exception as e:
-                logger.error(f"保存到图数据库失败: {e}")
-                graph_results = {"error": str(e)}
-        
-        response_data = {
+        # 初始化任务状态
+        task_status = {
             "document_id": document_id,
             "filename": file.filename,
-            "file_type": file_extension[1:],
-            "processing_status": ProcessingStatus.COMPLETED.value,
-            "document_sections": {
-                "sections": document_sections.sections,
-                "section_count": len(document_sections.sections)
-            },
-            "layered_extraction": {
-                "nodes": [
-                    {
-                        "node_type": node.node_type.value if hasattr(node.node_type, 'value') else str(node.node_type),
-                        "description": node.description,
-                        "standard_term": node.standard_term,
-                        "context": node.context,
-                    }
-                    for node in (layered_result.nodes if layered_result else [])
-                ],
-                "edges": [
-                    {
-                        "source": edge.source,
-                        "source_type": edge.source_type.value if hasattr(edge.source_type, 'value') else str(edge.source_type),
-                        "target": edge.target,
-                        "target_type": edge.target_type.value if hasattr(edge.target_type, 'value') else str(edge.target_type),
-                        "relation": edge.relation.value if hasattr(edge.relation, 'value') else str(edge.relation),
-                        "confidence": edge.confidence,
-                        "context": edge.context,
-                    }
-                    for edge in (layered_result.edges if layered_result else [])
-                ],
-                "node_count": len(layered_result.nodes) if layered_result else 0,
-                "edge_count": len(layered_result.edges) if layered_result else 0,
-            },
-            "event_chains": {
-                "chains": [
-                    {
-                        "source": chain.source,
-                        "relation": chain.relation.value if hasattr(chain.relation, 'value') else str(chain.relation),
-                        "target": chain.target,
-                        "confidence": chain.confidence,
-                        "context": chain.context
-                    } for chain in event_chains
-                ],
-                "count": len(event_chains)
-            },
-            "processing_statistics": processing_stats,
-            "graph_storage": {
-                "enabled": save_to_graph,
-                "results": graph_results,
-                "saved_count": len(graph_results) if isinstance(graph_results, list) else 0
-            }
+            "status": ProcessingStatus.PROCESSING.value,
+            "stage": "parsing",
+            "message": "正在解析文档内容...",
+            "progress": 10,
+            "start_time": datetime.now().isoformat(),
+            "result": None
         }
+        await _set_task_status(document_id, task_status)
         
-        logger.info(f"文档处理完成: {document_id}")
+        # 预读取文件内容到内存或临时文件，因为 UploadFile 在后台任务中可能会关闭
+        file_content = await file.read()
+        
+        async def run_extraction_task():
+            current_status = dict(task_status)
+
+            async def update_status(**updates: Any) -> None:
+                nonlocal current_status
+                current_status = {**current_status, **updates}
+                await _set_task_status(document_id, current_status)
+
+            try:
+                # 重新包装文件对象
+                from io import BytesIO
+                wrapped_file = UploadFile(
+                    file=BytesIO(file_content),
+                    filename=file.filename,
+                    headers=file.headers
+                )
+                
+                # 更新状态：提取中
+                await update_status(
+                    stage="extracting",
+                    message="正在提取事件链...",
+                    progress=30
+                )
+                
+                doc_id, document_sections, event_chains, processing_stats, layered_result = await extraction_service.process_document_with_extraction(
+                    wrapped_file,
+                    apply_validation=apply_validation,
+                    document_id=document_id # 传入固定的 ID
+                )
+
+                await update_status(
+                    stage="extracted",
+                    message="事件链提取完成，正在整理结果...",
+                    progress=60
+                )
+                
+                # 更新状态：存储中
+                if save_to_graph and event_chains:
+                    await update_status(
+                        stage="storing",
+                        message="正在保存到图数据库...",
+                        progress=80
+                    )
+                else:
+                    await update_status(
+                        stage="finalizing",
+                        message="正在整理处理结果...",
+                        progress=85
+                    )
+                
+                graph_results = None
+                if save_to_graph and event_chains:
+                    try:
+                        graph_results = await graph_service.batch_create_event_chains(event_chains)
+                    except Exception as e:
+                        logger.error(f"任务 {document_id} 存储失败: {e}")
+                        graph_results = {"error": str(e)}
+                
+                final_result = {
+                    "document_id": document_id,
+                    "filename": file.filename,
+                    "file_type": file_extension[1:],
+                    "processing_status": ProcessingStatus.COMPLETED.value,
+                    "document_sections": {
+                        "section_count": len(document_sections.sections)
+                    },
+                    "processing_statistics": processing_stats,
+                    "event_chains": {
+                        "count": len(event_chains),
+                        "chains": [
+                            {
+                                "source": chain.source,
+                                "relation": chain.relation.value if hasattr(chain.relation, 'value') else str(chain.relation),
+                                "target": chain.target,
+                                "confidence": chain.confidence,
+                                "context": chain.context
+                            } for chain in event_chains
+                        ]
+                    },
+                    "graph_results": graph_results,
+                    "layered_extraction": {
+                        "node_count": len(layered_result.nodes) if layered_result else 0,
+                        "edge_count": len(layered_result.edges) if layered_result else 0
+                    }
+                }
+                
+                # 更新状态：已完成
+                await update_status(
+                    status=ProcessingStatus.COMPLETED.value,
+                    stage="completed",
+                    message="文档处理完成",
+                    progress=100,
+                    result=final_result,
+                    end_time=datetime.now().isoformat()
+                )
+                
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"后台任务 {document_id} 失败: {error_msg}")
+                await update_status(
+                    status=ProcessingStatus.FAILED.value,
+                    stage="failed",
+                    message=_classify_error(error_msg),
+                    error=error_msg,
+                    end_time=datetime.now().isoformat()
+                )
+
+        background_tasks.add_task(run_extraction_task)
         
         return BaseResponse(
             status=ResponseStatus.SUCCESS,
-            message=f"文档处理成功，提取到 {len(event_chains)} 个有效事件链",
-            data=response_data
+            message="文件已上传，后台正在处理",
+            data={"document_id": document_id, "status": "processing"}
         )
         
     except HTTPException:
         raise
     except Exception as e:
-        error_msg = str(e)
-        logger.error(f"文档处理失败: {error_msg}")
-        user_friendly_detail = _classify_error(error_msg)
+        logger.error(f"发起处理任务失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=user_friendly_detail
+            detail=f"无法发起处理任务: {str(e)}"
         )
+
+@router.get("/status/{document_id}", response_model=BaseResponse)
+async def get_task_status(document_id: str):
+    """获取文档处理任务状态"""
+    task_status = await redis_client.get(f"task:{document_id}")
+    if not task_status:
+        raise HTTPException(status_code=404, detail="任务不存在或已过期")
+    
+    return BaseResponse(
+        status=ResponseStatus.SUCCESS,
+        message="查询成功",
+        data=task_status
+    )
 
 
 def _classify_error(error_msg: str) -> str:

@@ -1,119 +1,161 @@
 'use client'
 
-import React, { useState, useCallback, useEffect } from 'react'
-import { Upload, X, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
+import { useCallback, useEffect, useId, useMemo, useState, useRef } from 'react'
+import { AlertCircle, CheckCircle, Loader2, Upload, X } from 'lucide-react'
 import axios from 'axios'
+import type { UploadResult } from '@/types/upload'
 
 interface FileUploadProps {
-  onUploadSuccess?: (result: any) => void
+  onUploadSuccess?: (result: UploadResult) => void
   onUploadError?: (error: string) => void
   className?: string
 }
 
-interface UploadResult {
+interface TaskStatus {
   document_id: string
-  filename: string
-  file_type: string
-  event_chains?: {
-    count: number
-    chains: Array<{
-      source: string
-      relation: string
-      target: string
-      confidence: number
-    }>
-  }
-  processing_statistics?: {
-    raw_chains: number
-    valid_chains: number
-    validation_rate: number
-    avg_confidence: number
-  }
-  document_sections?: {
-    section_count: number
-  }
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  stage: string
+  message: string
+  progress: number
+  result?: UploadResult
+  error?: string
 }
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '')
-const DOCUMENT_PROCESS_ENDPOINT = API_BASE_URL
-  ? `${API_BASE_URL}/api/v1/documents/process`
-  : '/api/v1/documents/process'
+const DOCUMENT_PROCESS_ENDPOINT = `${API_BASE_URL}/api/v1/documents/process`
+const GET_STATUS_ENDPOINT = (id: string) => `${API_BASE_URL}/api/v1/documents/status/${id}`
 
 export default function FileUpload({ onUploadSuccess, onUploadError, className }: FileUploadProps) {
+  const inputId = useId()
   const [isDragOver, setIsDragOver] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadStage, setUploadStage] = useState('')
+  const [progress, setProgress] = useState(0)
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current)
+      pollTimerRef.current = null
+    }
+  }, [])
 
   useEffect(() => {
-    if (!isUploading) {
-      setUploadStage('')
-      return
+    return () => stopPolling()
+  }, [stopPolling])
+
+  const pollTaskStatus = useCallback((documentId: string) => {
+    stopPolling()
+    
+    pollTimerRef.current = setInterval(async () => {
+      try {
+        const response = await axios.get(GET_STATUS_ENDPOINT(documentId))
+        if (response.data.status === 'success') {
+          const task = response.data.data as TaskStatus
+          
+          setUploadStage(task.message)
+          setProgress(task.progress)
+
+          if (task.status === 'completed') {
+            stopPolling()
+            setIsUploading(false)
+            if (task.result) {
+              setUploadResult(task.result)
+              onUploadSuccess?.(task.result)
+            }
+          } else if (task.status === 'failed') {
+            stopPolling()
+            setIsUploading(false)
+            setError(task.message || '任务执行失败')
+            onUploadError?.(task.message || '任务执行失败')
+          }
+        }
+      } catch (err) {
+        console.error('Polling error:', err)
+      }
+    }, 2000)
+  }, [onUploadError, onUploadSuccess, stopPolling])
+
+  const uploadMetrics = useMemo(() => {
+    if (!uploadResult?.processing_statistics) {
+      return []
     }
 
-    setUploadStage('正在上传文档...')
-
-    const timers = [
-      window.setTimeout(() => setUploadStage('正在解析文档内容...'), 3000),
-      window.setTimeout(() => setUploadStage('正在提取事件链...'), 10000),
-      window.setTimeout(() => setUploadStage('正在保存图谱结果...'), 20000),
+    return [
+      {
+        label: '原始事件链',
+        value: `${uploadResult.processing_statistics.raw_chains}`,
+      },
+      {
+        label: '有效事件链',
+        value: `${uploadResult.processing_statistics.valid_chains}`,
+      },
+      {
+        label: '验证通过率',
+        value: `${(uploadResult.processing_statistics.validation_rate * 100).toFixed(1)}%`,
+      },
+      {
+        label: '平均置信度',
+        value: uploadResult.processing_statistics.avg_confidence.toFixed(2),
+      },
     ]
+  }, [uploadResult])
 
-    return () => {
-      timers.forEach((timer) => window.clearTimeout(timer))
-    }
-  }, [isUploading])
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
+  const handleDragOver = useCallback((event: React.DragEvent<HTMLLabelElement>) => {
+    event.preventDefault()
     setIsDragOver(true)
   }, [])
 
-  const handleDragLeave = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
+  const handleDragLeave = useCallback((event: React.DragEvent<HTMLLabelElement>) => {
+    event.preventDefault()
     setIsDragOver(false)
   }, [])
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
+  const handleDrop = useCallback((event: React.DragEvent<HTMLLabelElement>) => {
+    event.preventDefault()
     setIsDragOver(false)
 
-    const files = Array.from(e.dataTransfer.files)
-    if (files.length > 0 && files[0]) {
-      handleFileUpload(files[0])
+    const file = event.dataTransfer.files?.[0]
+    if (file) {
+      void handleFileUpload(file)
     }
   }, [])
 
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (files && files.length > 0 && files[0]) {
-      handleFileUpload(files[0])
+  const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      void handleFileUpload(file)
+      event.target.value = ''
     }
   }, [])
 
   const handleFileUpload = async (file: File) => {
     const allowedTypes = ['.pdf', '.docx', '.txt']
-    const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase()
+    const fileExtension = `.${file.name.split('.').pop()?.toLowerCase()}`
 
     if (!allowedTypes.includes(fileExtension)) {
-      const errorMsg = `不支持的文件类型: ${fileExtension}。支持的格式: ${allowedTypes.join(', ')}`
-      setError(errorMsg)
-      onUploadError?.(errorMsg)
+      const errorMessage = `不支持的文件类型: ${fileExtension}。支持格式: ${allowedTypes.join(', ')}`
+      setError(errorMessage)
+      onUploadError?.(errorMessage)
       return
     }
 
     const maxSize = 50 * 1024 * 1024
     if (file.size > maxSize) {
-      const errorMsg = `文件大小超过限制 (${Math.round(maxSize / 1024 / 1024)}MB)`
-      setError(errorMsg)
-      onUploadError?.(errorMsg)
+      const errorMessage = `文件大小超过限制 (${Math.round(maxSize / 1024 / 1024)}MB)`
+      setError(errorMessage)
+      onUploadError?.(errorMessage)
       return
     }
 
     setIsUploading(true)
     setError(null)
     setUploadResult(null)
+    setProgress(5)
+    setUploadStage('正在上传文档...')
 
     try {
       const formData = new FormData()
@@ -121,300 +163,182 @@ export default function FileUpload({ onUploadSuccess, onUploadError, className }
       formData.append('apply_validation', 'true')
       formData.append('save_to_graph', 'true')
 
-      const response = await axios.post(DOCUMENT_PROCESS_ENDPOINT, formData, {
-        timeout: 300000,
-      })
+      const response = await axios.post(DOCUMENT_PROCESS_ENDPOINT, formData)
 
-      if (response.data.status === 'success') {
-        const result = response.data.data
-        setUploadResult(result)
-        onUploadSuccess?.(result)
-      } else {
+      if (response.data.status !== 'success') {
         throw new Error(response.data.message || '上传处理失败')
       }
-      } catch (err: any) {
-        let errorMessage = '上传失败'
 
-        if (err.code === 'ECONNABORTED') {
-          errorMessage = '上传超时，请稍后重试'
-        } else if (err.response?.data?.detail) {
-          errorMessage = Array.isArray(err.response.data.detail)
-            ? err.response.data.detail.map((item: any) => item.msg || JSON.stringify(item)).join('；')
-            : err.response.data.detail
-        } else if (err.request && !err.response) {
-          errorMessage = '无法连接到后端服务，请检查后端是否已启动'
-        } else if (err.message) {
-          errorMessage = err.message
-        }
-setError(errorMessage)
-      onUploadError?.(errorMessage)
-    } finally {
+      const { document_id } = response.data.data
+      pollTaskStatus(document_id)
+      
+    } catch (requestError) {
       setIsUploading(false)
+      let errorMessage = '上传失败'
+      if (axios.isAxiosError(requestError)) {
+        if (requestError.code === 'ECONNABORTED') {
+          errorMessage = '上传超时，请稍后重试'
+        } else if (requestError.response?.data?.detail) {
+          const detail = requestError.response.data.detail
+          errorMessage = Array.isArray(detail)
+            ? detail.map((item: { msg?: string }) => item.msg || JSON.stringify(item)).join('；')
+            : String(detail)
+        } else if (requestError.request && !requestError.response) {
+          errorMessage = '无法连接到后端服务，请确认后端接口已启动'
+        } else if (requestError.message) {
+          errorMessage = requestError.message
+        }
+      } else if (requestError instanceof Error) {
+        errorMessage = requestError.message
+      }
+
+      setError(errorMessage)
+      onUploadError?.(errorMessage)
     }
   }
 
   const resetUpload = () => {
     setUploadResult(null)
     setError(null)
+    stopPolling()
   }
 
   return (
-    <div style={{ width: '100%', maxWidth: '48rem', margin: '0 auto' }} className={className}>
-      <div
-        style={{
-          position: 'relative',
-          border: isDragOver ? '2px dashed rgba(251, 146, 60, 0.8)' : '2px dashed rgba(255, 255, 255, 0.4)',
-          borderRadius: '1rem',
-          padding: '3rem 2rem',
-          textAlign: 'center',
-          transition: 'all 0.3s',
-          backgroundColor: isDragOver
-            ? 'rgba(251, 146, 60, 0.1)'
-            : isUploading
-              ? 'rgba(255, 255, 255, 0.1)'
-              : 'rgba(255, 255, 255, 0.15)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          cursor: isUploading ? 'not-allowed' : 'pointer',
-        }}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-      >
-        <input
-          type="file"
-          accept=".pdf,.docx,.txt"
-          onChange={handleFileSelect}
-          style={{
-            position: 'absolute',
-            inset: 0,
-            width: '100%',
-            height: '100%',
-            opacity: 0,
-            cursor: isUploading ? 'not-allowed' : 'pointer',
-          }}
-          disabled={isUploading}
-        />
-
-        {isUploading ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <Loader2
-              style={{
-                width: '3rem',
-                height: '3rem',
-                color: 'rgba(251, 146, 60, 1)',
-                animation: 'spin 1s linear infinite',
-                marginBottom: '1rem',
-              }}
-            />
-            <p
-              style={{
-                fontSize: '1.125rem',
-                fontWeight: '600',
-                color: 'white',
-                marginBottom: '0.5rem',
-              }}
-            >
-              {uploadStage || '正在处理文档...'}
-            </p>
-            <p
-              style={{
-                fontSize: '0.875rem',
-                color: 'rgba(255, 255, 255, 0.8)',
-              }}
-            >
-              推荐使用内置演示样例或 1MB 以内的 DOCX/TXT，可复制文本 PDF 效果更稳定
+    <div className={className}>
+      <div className="surface-panel-strong rounded-[2rem] p-5 sm:p-6">
+        <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <span className="eyebrow">Document Intake</span>
+            <h2 className="mt-3 text-2xl font-semibold text-slate-950">上传调查文档</h2>
+            <p className="mt-2 text-sm leading-7 text-slate-600">
+              支持 PDF、DOCX、TXT。后台异步执行抽取任务，支持真实进度追踪。
             </p>
           </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <div
-              style={{
-                width: '4rem',
-                height: '4rem',
-                borderRadius: '50%',
-                backgroundColor: 'rgba(251, 146, 60, 0.2)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                marginBottom: '1.5rem',
-              }}
-            >
-              <Upload
-                style={{
-                  width: '2rem',
-                  height: '2rem',
-                  color: 'rgba(251, 146, 60, 1)',
-                }}
-              />
+          <div className="rounded-full border border-slate-900/10 bg-white/70 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+            最大 50MB
+          </div>
+        </div>
+
+        <label
+          htmlFor={inputId}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={`block rounded-[1.75rem] border-2 border-dashed px-6 py-10 text-center transition duration-200 ${
+            isDragOver
+              ? 'border-primary-700 bg-orange-50/70'
+              : isUploading
+                ? 'border-slate-300 bg-white/55'
+                : 'border-slate-300 bg-white/70 hover:border-primary-700 hover:bg-white/85'
+          } ${isUploading ? 'cursor-progress' : 'cursor-pointer'}`}
+        >
+          <input
+            id={inputId}
+            type="file"
+            accept=".pdf,.docx,.txt"
+            className="sr-only"
+            onChange={handleFileSelect}
+            disabled={isUploading}
+          />
+
+          <div className="mx-auto flex max-w-xl flex-col items-center">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-orange-100 text-primary-700 shadow-inner shadow-orange-200/80">
+              {isUploading ? <Loader2 className="h-7 w-7 animate-spin" /> : <Upload className="h-7 w-7" />}
             </div>
-            <p
-              style={{
-                fontSize: '1.25rem',
-                fontWeight: '600',
-                color: 'white',
-                marginBottom: '0.5rem',
-              }}
-            >
-              拖拽文件到此处或点击上传
+            <div className="mt-5 text-xl font-semibold text-slate-950">
+              {isUploading ? uploadStage || '正在处理任务...' : '拖拽文件到这里，或点击选择文件'}
+            </div>
+            
+            {isUploading && (
+              <div className="mt-6 w-full max-w-sm">
+                <div className="flex justify-between mb-2">
+                  <span className="text-xs font-medium text-slate-500">任务进度</span>
+                  <span className="text-xs font-bold text-primary-700">{progress}%</span>
+                </div>
+                <div className="h-2 w-full bg-slate-200 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-gradient-to-r from-primary-600 to-accent-500 transition-all duration-500" 
+                    style={{ width: `${progress}%` }} 
+                  />
+                </div>
+              </div>
+            )}
+
+            <p className="mt-3 max-w-lg text-sm leading-7 text-slate-600">
+              {isUploading
+                ? '处理时间取决于文档规模。您可以等待任务完成，或稍后刷新状态。'
+                : '上传后将依次执行文档解析、事件链抽取、术语校验与图谱入库。'}
             </p>
-            <p
-              style={{
-                fontSize: '0.875rem',
-                color: 'rgba(255, 255, 255, 0.8)',
-                marginBottom: '1rem',
-              }}
-            >
-              支持 PDF、DOCX、TXT 格式，最大 50MB，推荐 DOCX/TXT 或可复制文本 PDF
-            </p>
+          </div>
+        </label>
+
+        {error && (
+          <div className="mt-5 flex items-start gap-3 rounded-[1.5rem] border border-red-200 bg-red-50 px-5 py-4 text-red-700">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
+            <div>
+              <div className="text-sm font-semibold">任务异常</div>
+              <p className="mt-1 text-sm leading-7">{error}</p>
+            </div>
+          </div>
+        )}
+
+        {uploadResult && (
+          <div className="mt-5 rounded-[1.75rem] border border-emerald-200 bg-emerald-50/90 p-5 sm:p-6">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-600 text-white">
+                  <CheckCircle className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-950">文档处理成功</h3>
+                  <p className="mt-1 text-sm leading-7 text-slate-600">
+                    后台任务已执行完毕，提取结果已同步至图数据库。
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={resetUpload}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-900/10 bg-white/70 text-slate-500 transition hover:bg-white hover:text-slate-900"
+                aria-label="清除当前上传结果"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="stat-card">
+                <div className="text-sm text-slate-500">文档 ID</div>
+                <div className="mt-2 break-all text-sm font-semibold text-slate-900">{uploadResult.document_id}</div>
+              </div>
+              <div className="stat-card">
+                <div className="text-sm text-slate-500">文件类型</div>
+                <div className="mt-2 text-xl font-semibold text-slate-950">{uploadResult.file_type.toUpperCase()}</div>
+              </div>
+              <div className="stat-card">
+                <div className="text-sm text-slate-500">提取事件链</div>
+                <div className="mt-2 text-3xl font-semibold text-slate-950">{uploadResult.event_chains?.count ?? 0}</div>
+              </div>
+              <div className="stat-card">
+                <div className="text-sm text-slate-500">文档章节</div>
+                <div className="mt-2 text-3xl font-semibold text-slate-950">{uploadResult.document_sections?.section_count ?? 0}</div>
+              </div>
+            </div>
+
+            {uploadMetrics.length > 0 && (
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {uploadMetrics.map((item) => (
+                  <div key={item.label} className="rounded-3xl border border-slate-900/8 bg-white/75 p-4">
+                    <div className="text-sm text-slate-500">{item.label}</div>
+                    <div className="mt-2 text-2xl font-semibold text-slate-950">{item.value}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
-
-      {error && (
-        <div
-          style={{
-            marginTop: '1.5rem',
-            padding: '1rem 1.25rem',
-            borderRadius: '0.75rem',
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            border: '1px solid rgba(239, 68, 68, 0.2)',
-            backdropFilter: 'blur(10px)',
-            WebkitBackdropFilter: 'blur(10px)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-          }}
-        >
-          <AlertCircle
-            style={{
-              width: '1.25rem',
-              height: '1.25rem',
-              color: 'rgba(248, 113, 113, 1)',
-              flexShrink: 0,
-            }}
-          />
-          <p
-            style={{
-              color: 'rgba(254, 202, 202, 1)',
-              fontSize: '0.875rem',
-              margin: 0,
-            }}
-          >
-            {error}
-          </p>
-        </div>
-      )}
-
-      {uploadResult && (
-        <div
-          style={{
-            marginTop: '1.5rem',
-            padding: '1.5rem',
-            borderRadius: '1rem',
-            backgroundColor: 'rgba(34, 197, 94, 0.1)',
-            border: '1px solid rgba(34, 197, 94, 0.2)',
-            backdropFilter: 'blur(10px)',
-            WebkitBackdropFilter: 'blur(10px)',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: '1rem',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <CheckCircle
-                style={{
-                  width: '1.5rem',
-                  height: '1.5rem',
-                  color: 'rgba(34, 197, 94, 1)',
-                }}
-              />
-              <h3
-                style={{
-                  color: 'white',
-                  fontSize: '1.125rem',
-                  fontWeight: '600',
-                  margin: 0,
-                }}
-              >
-                文档处理成功
-              </h3>
-            </div>
-            <button
-              onClick={resetUpload}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'rgba(255, 255, 255, 0.6)',
-                cursor: 'pointer',
-                padding: '0.25rem',
-                borderRadius: '0.375rem',
-                transition: 'all 0.2s',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)'
-                e.currentTarget.style.color = 'white'
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent'
-                e.currentTarget.style.color = 'rgba(255, 255, 255, 0.6)'
-              }}
-            >
-              <X style={{ width: '1.25rem', height: '1.25rem' }} />
-            </button>
-          </div>
-
-          <div
-            style={{
-              display: 'grid',
-              gap: '0.75rem',
-              fontSize: '0.875rem',
-              color: 'rgba(255, 255, 255, 0.9)',
-            }}
-          >
-            <div>
-              <span style={{ fontWeight: '600' }}>文档ID:</span> {uploadResult.document_id}
-            </div>
-            <div>
-              <span style={{ fontWeight: '600' }}>文件名:</span> {uploadResult.filename}
-            </div>
-            <div>
-              <span style={{ fontWeight: '600' }}>文件类型:</span> {uploadResult.file_type.toUpperCase()}
-            </div>
-            {uploadResult.event_chains && (
-              <div>
-                <span style={{ fontWeight: '600' }}>提取事件链:</span> {uploadResult.event_chains.count} 个
-              </div>
-            )}
-            {uploadResult.document_sections && (
-              <div>
-                <span style={{ fontWeight: '600' }}>文档章节:</span> {uploadResult.document_sections.section_count} 个
-              </div>
-            )}
-            {uploadResult.processing_statistics && (
-              <>
-                <div>
-                  <span style={{ fontWeight: '600' }}>原始事件链:</span> {uploadResult.processing_statistics.raw_chains} 个
-                </div>
-                <div>
-                  <span style={{ fontWeight: '600' }}>有效事件链:</span> {uploadResult.processing_statistics.valid_chains} 个
-                </div>
-                <div>
-                  <span style={{ fontWeight: '600' }}>验证通过率:</span> {(uploadResult.processing_statistics.validation_rate * 100).toFixed(1)}%
-                </div>
-                <div>
-                  <span style={{ fontWeight: '600' }}>平均置信度:</span> {uploadResult.processing_statistics.avg_confidence.toFixed(2)}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   )
 }
