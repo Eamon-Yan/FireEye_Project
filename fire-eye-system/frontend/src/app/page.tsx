@@ -57,7 +57,7 @@ export default function HomePage() {
                 火瞳系统将调查文档转化为可检索、可验证的火灾事理图谱。
               </h1>
               <p className="mt-5 max-w-2xl text-base leading-8 text-slate-600 sm:text-lg">
-                面向竞赛展示场景，首页聚焦核心流程说明与关键入口，减少首次进入即面对复杂图谱的理解门槛。
+                聚焦核心流程说明与关键入口，减少首次进入即面对复杂图谱的理解门槛。
               </p>
             </div>
 

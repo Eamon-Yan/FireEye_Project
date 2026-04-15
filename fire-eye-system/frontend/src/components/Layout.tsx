@@ -68,7 +68,7 @@ export default function Layout({ children }: LayoutProps) {
 
             <div className="hidden items-center gap-3 md:flex">
               <div className="rounded-full border border-slate-900/10 bg-white/60 px-4 py-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-600">
-                Web Demo
+                Web Front
               </div>
             </div>
 
