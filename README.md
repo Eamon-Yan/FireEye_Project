@@ -1,4 +1,4 @@
-<img width="260" height="88" alt="image" src="https://github.com/user-attachments/assets/daadaf22-c03a-40ad-af6d-35fca83bbc9b" /># 火瞳 (FireEye) —— 基于 LLM 与 neo4j 知识图谱的火灾智能分析系统
+# 火瞳 (FireEye) —— 基于 LLM 与 neo4j 知识图谱的火灾智能分析系统
 
 > **2026中国大学生计算机设计大赛（人工智能赛道）项目**
 >
