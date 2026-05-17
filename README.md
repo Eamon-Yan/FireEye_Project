@@ -1,8 +1,8 @@
-# 火瞳 (FireEye) —— 基于 LLM 与 neo4j 知识图谱的火灾智能分析系统
+<img width="260" height="88" alt="image" src="https://github.com/user-attachments/assets/daadaf22-c03a-40ad-af6d-35fca83bbc9b" /># 火瞳 (FireEye) —— 基于 LLM 与 neo4j 知识图谱的火灾智能分析系统
 
 > **2026中国大学生计算机设计大赛（人工智能赛道）项目**
 >
-> 本项目采用 **SDD（Specification-Driven Development，规范驱动开发）** 模式，基于 **Kiro Spec** 规范与 **Vibe Coding** 工作流进行全栈高效率交付。
+> 本项目采用 **SDD（Specification-Driven Development，规范驱动开发）** 模式，基于 **Kiro Spec** 规范与 **Vibe Coding** 工作流进行全栈高效率开发。
 
 ---
 
@@ -17,14 +17,14 @@
 * **基础设施：** Docker 容器化集群 + Linux 生产环境运维
 
 ### 2. 业务链路
-数据采集输入 ➔ LLM 实体抽取与关系沉淀 ➔ Neo4j 图数据库拓扑关联 ➔ 结合大模型上下文推理 ➔ AstrBot Agent 多端实时监控与自然语言交互。
+数据采集输入 ➔ LLM 实体抽取与关系沉淀 ➔ 事件链校验 ➔ 术语归一化 ➔ Neo4j 图数据库存储 ➔ 导出复用 + AstrBot Agent 多端实时监控与自然语言交互。
 
 ---
 
 ## 🛠 规范驱动开发 (SDD) 实践
 
 本项目深度践行了 AI 时代的全新开发范式：
-* **架构先行：** 绝不盲目对 AI 灌输 Prompt，而是优先使用 **Kiro Spec** 定义严谨的业务边界、数据结构与底层契约。
+* **架构先行：** 不盲目对 AI 灌输 Prompt，而是优先使用 **Kiro Spec** 定义严谨的业务边界、数据结构与底层契约。
 * **精准规训：** 将编写好的静态 Spec 规范作为核心 Context 喂给 AI（如 Claude Code / DeepSeek），在受限的“规范沙盒”内进行高质量代码生成，大幅降低了 AI 幻觉，使复杂功能的编译一次通过率显著提升。
 
 ---
