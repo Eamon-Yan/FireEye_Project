@@ -1,6 +1,5 @@
 # 火瞳 (FireEye) —— 基于 LLM 与 neo4j 知识图谱的火灾智能分析系统
 
-> **2026中国大学生计算机设计大赛（人工智能赛道）项目**
 >
 > 本项目采用 **SDD（Specification-Driven Development，规范驱动开发）** 模式，基于 **Kiro Spec** 规范与 **Vibe Coding** 工作流进行全栈高效率开发。
 
