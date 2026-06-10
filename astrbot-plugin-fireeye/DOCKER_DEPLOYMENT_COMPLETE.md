@@ -23,7 +23,7 @@
 ### 3. 配置文件更新 ✅
 - 创建 Docker 专用配置文件 `config.docker.yaml`
 - 配置后端 API 地址: `http://fire-eye-backend:8000/api/v1`
-- 生成并配置 API 密钥: `smKlDXGrWLD9AzaT-ouPQjXUmQ9Zpfe3xBrcgwor3YA`
+- 生成并配置 API 密钥: `change-me-in-production`
 - 配置日志路径: `/AstrBot/data/logs/fireeye.log`
 - 配置临时文件目录: `/tmp/fireeye`
 
@@ -67,7 +67,7 @@
 
 ### API 配置
 - **后端 URL**: `http://fire-eye-backend:8000/api/v1`
-- **API 密钥**: `smKlDXGrWLD9AzaT-ouPQjXUmQ9Zpfe3xBrcgwor3YA`
+- **API 密钥**: `change-me-in-production`
 - **超时时间**: 30 秒
 - **重试次数**: 3 次
 
@@ -96,7 +96,7 @@
 ### 网络连通性测试 ✅
 ```bash
 docker exec astrbot curl -v http://fire-eye-backend:8000/api/v1/chat/stats \
-  -H "X-API-Key: smKlDXGrWLD9AzaT-ouPQjXUmQ9Zpfe3xBrcgwor3YA"
+  -H "X-API-Key: change-me-in-production"
 ```
 **结果**: HTTP 200 OK，返回统计数据
 
@@ -192,7 +192,7 @@ docker exec astrbot cat /AstrBot/data/logs/fireeye.log
 ```bash
 # 测试统计接口
 docker exec astrbot curl http://fire-eye-backend:8000/api/v1/chat/stats \
-  -H "X-API-Key: smKlDXGrWLD9AzaT-ouPQjXUmQ9Zpfe3xBrcgwor3YA"
+  -H "X-API-Key: change-me-in-production"
 ```
 
 ### 进入容器

@@ -83,7 +83,9 @@ class Main(star.Star):
     def _load_config(self):
         """加载配置文件"""
         default_api_url = "http://host.docker.internal:8000/api/v1"
-        default_api_key = "smKlDXGrWLD9AzaT-ouPQjXUmQ9Zpfe3xBrcgwor3YA"
+
+        # 🔐 api_key 优先级: config.yaml > 环境变量 FIRE_EYE_API_KEY > 报错
+        env_api_key = os.environ.get('FIRE_EYE_API_KEY')
 
         try:
             config_path = Path(__file__).parent / "config.yaml"
@@ -91,7 +93,9 @@ class Main(star.Star):
             if not config_path.exists():
                 logger.error(f"[Fire-Eye QQ] Configuration file not found: {config_path}")
                 self.api_url = self._normalize_api_url(default_api_url)
-                self.api_key = default_api_key
+                self.api_key = env_api_key
+                if not self.api_key:
+                    raise ValueError("FIRE_EYE_API_KEY 未设置：请在 config.yaml 或环境变量中配置")
                 return
             
             with open(config_path, 'r', encoding='utf-8') as f:
@@ -99,14 +103,18 @@ class Main(star.Star):
             
             fire_eye_config = self.plugin_config.get('fire_eye', {})
             self.api_url = self._normalize_api_url(fire_eye_config.get('api_url', default_api_url))
-            self.api_key = fire_eye_config.get('api_key', default_api_key)
+            self.api_key = fire_eye_config.get('api_key') or env_api_key
+            if not self.api_key:
+                raise ValueError("FIRE_EYE_API_KEY 未设置：请在 config.yaml 的 fire_eye.api_key 或环境变量中配置")
             
             logger.info("[Fire-Eye QQ] Configuration loaded successfully")
             
         except Exception as e:
             logger.error(f"[Fire-Eye QQ] Failed to load config: {e}")
             self.api_url = self._normalize_api_url(default_api_url)
-            self.api_key = default_api_key
+            self.api_key = env_api_key
+            if not self.api_key:
+                raise ValueError(f"FIRE_EYE_API_KEY 未设置：配置加载失败且环境变量也未设置 ({e})")
     
     def _initialize_components(self):
         """初始化组件"""

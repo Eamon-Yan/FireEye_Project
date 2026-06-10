@@ -3,6 +3,7 @@ Fire-Eye QQ Plugin - Debug Version
 用于诊断命令处理问题
 """
 
+import os
 import yaml
 import aiohttp
 from pathlib import Path
@@ -47,23 +48,29 @@ class Main(star.Star):
             
             if not config_path.exists():
                 logger.error(f"[Fire-Eye QQ DEBUG] Configuration file not found: {config_path}")
-                self.api_url = "http://127.0.0.1:8000/api/v1"
-                self.api_key = "smKlDXGrWLD9AzaT-ouPQjXUmQ9Zpfe3xBrcgwor3YA"
+                self.api_url = os.environ.get('FIRE_EYE_API_URL', 'http://127.0.0.1:8000/api/v1')
+                self.api_key = os.environ.get('FIRE_EYE_API_KEY')
+                if not self.api_key:
+                    raise ValueError("FIRE_EYE_API_KEY 未设置")
                 return
             
             with open(config_path, 'r', encoding='utf-8') as f:
                 self.plugin_config = yaml.safe_load(f)
             
             fire_eye_config = self.plugin_config.get('fire_eye', {})
-            self.api_url = fire_eye_config.get('api_url', 'http://127.0.0.1:8000/api/v1')
-            self.api_key = fire_eye_config.get('api_key', 'smKlDXGrWLD9AzaT-ouPQjXUmQ9Zpfe3xBrcgwor3YA')
+            self.api_url = fire_eye_config.get('api_url') or os.environ.get('FIRE_EYE_API_URL', 'http://127.0.0.1:8000/api/v1')
+            self.api_key = fire_eye_config.get('api_key') or os.environ.get('FIRE_EYE_API_KEY')
+            if not self.api_key:
+                raise ValueError("FIRE_EYE_API_KEY 未设置：请在 config.yaml 或环境变量中配置")
             
             logger.info(f"[Fire-Eye QQ DEBUG] Config loaded from {config_path}")
             
         except Exception as e:
             logger.error(f"[Fire-Eye QQ DEBUG] Failed to load config: {e}")
-            self.api_url = "http://127.0.0.1:8000/api/v1"
-            self.api_key = "smKlDXGrWLD9AzaT-ouPQjXUmQ9Zpfe3xBrcgwor3YA"
+            self.api_url = os.environ.get('FIRE_EYE_API_URL', 'http://127.0.0.1:8000/api/v1')
+            self.api_key = os.environ.get('FIRE_EYE_API_KEY')
+            if not self.api_key:
+                raise ValueError(f"FIRE_EYE_API_KEY 未设置：配置加载失败 ({e})")
     
     def _initialize_components(self):
         """初始化组件"""

@@ -3,7 +3,7 @@
 # Fire-Eye 后端 API 配置
 fire_eye:
   api_url: "http://localhost:8000/api/v1"
-  api_key: "your-api-key-here"  # 请替换为实际的 API Key
+  api_key: "change-me-in-production"  # 🔴 部署前请替换为实际 API Key
   timeout: 30  # 请求超时时间（秒）
   retries: 3   # 失败重试次数
 
